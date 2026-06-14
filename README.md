@@ -97,11 +97,56 @@ The `<prefix>` is a date-time stamp. The default renders as `YYYY-MM-DD_HH-MM` (
 
 ## Optional depth layer (browser-use)
 
-<!-- PLACEHOLDER — filled in the depth slice (Step 10). -->
+The depth layer lets scout drive a **real local Chromium browser** for pages the breadth layer cannot reach over plain HTTP: JavaScript-rendered content, owned-account logins, interactive interfaces. It is the [browser-use](https://github.com/browser-use/browser-use) stack, run locally and exposed to scout as an MCP server.
 
-The optional depth layer (a local browser-use MCP server, for pages that need an interactive browser) is **added in the depth slice**. Registration instructions, the pinned version, the required no-cloud environment variables, and an honest note on what walls it can and cannot get past will appear here.
+It is **entirely optional**. If you never register it, scout runs breadth-only and records any page that genuinely needs an interactive browser as a "needs depth tools" gap in the report's blocked-sources table — never silently dropped. Register it only if you actually hit such pages.
 
-Until then, scout runs breadth-only: any page that genuinely needs an interactive browser is recorded as a "needs depth tools" gap in the report's blocked-sources table, never silently dropped.
+### Register the MCP server
+
+Add this to your Claude Code MCP settings. It runs browser-use locally via `uvx`, pinned to the version scout is tested against:
+
+```json
+{
+  "mcpServers": {
+    "browser-use": {
+      "command": "uvx",
+      "args": ["browser-use[cli]@0.11.9", "--mcp"],
+      "env": {
+        "OPENAI_API_KEY": "<your own OpenAI API key>",
+        "ANONYMIZED_TELEMETRY": "False",
+        "BROWSER_USE_VERSION_CHECK": "false"
+      }
+    }
+  }
+}
+```
+
+The pin is `0.11.9` — the version scout's depth layer is built and verified against. A version bump is a deliberate, tested change, not an automatic track.
+
+### Both no-cloud environment variables are mandatory
+
+`ANONYMIZED_TELEMETRY=False` and `BROWSER_USE_VERSION_CHECK=false` **must appear in every documented snippet**, here and anywhere else you register the server. They disable browser-use's two on-by-default outbound pings — the PostHog telemetry call and the version-check call. Without them, registering the server quietly phones home on startup. Do not omit either one.
+
+### You need your own OpenAI API key
+
+The depth layer's two LLM-using tools — `browser_extract_content` (turn a page into structured text) and `retry_with_browser_use_agent` (the last-resort internal loop) — call an LLM, and you supply the key via `OPENAI_API_KEY`. `browser_extract_content` is **hardwired to OpenAI** at the MCP layer in this version, so an OpenAI mini model is the default.
+
+This is not a "no cloud" violation. scout's no-cloud rule bans browser-use's **hosted service** (browser-use Cloud) — the browser runs entirely on your machine. The LLM call for content extraction is an ordinary external LLM call, the same kind scout makes for everything else. (Routing extraction through Anthropic instead of OpenAI needs an upstream browser-use patch and is out of scope here.)
+
+### Server name and tool prefix must match
+
+The server key `browser-use` in the snippet above must equal the `mcp__browser-use__` prefix in scout's tool allow-list (`agents/scout.md`). They are coupled: scout's allow-list names the tools as `mcp__browser-use__browser_navigate`, `mcp__browser-use__browser_get_state`, and so on. **If you register the server under a different name, the allow-list prefix must track it** — otherwise scout cannot see the depth tools and silently falls back to breadth-only. Keep the name `browser-use` unless you have a reason to change both sides.
+
+### No captcha-solving — the foreground-handoff two-step
+
+Be clear-eyed about this: **nothing in this local, no-cloud configuration reliably defeats a modern captcha.** That capability was given up when scout chose local browser-use over browser-use Cloud. scout will not pretend otherwise — it caps captcha effort at a few steps and moves on.
+
+When scout hits a wall on a source it judges essential — a captcha, a login, a hard 403, an interstitial — it does **not** silently drop it. It returns a **blocked-sources block** in the report: the URL, the wall type, and what a human must do to clear it. The handoff back to you is two steps:
+
+1. scout returns the blocked-sources block. You see exactly which sources are walled and why.
+2. You clear the wall **live, in a foreground browser-use session** — log in, solve the captcha, whatever it takes. The persistent local Chromium profile (`~/.config/browseruse/profiles/default`) captures the authenticated state. Then you **re-run scout**, and it reaches the now-unlocked source on the next pass.
+
+The wall becomes structured information you act on out-of-band, not a silent gap and not a budget-burning captcha loop.
 
 ## Language
 
@@ -110,7 +155,8 @@ Default is English. scout ships professional-voice style profiles (for the repor
 ## Requirements
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) v2.0.12 or higher.
-- That's it for the breadth layer — no git, no Node, no Python. (The optional depth layer has its own requirements, documented in its section above when it lands.)
+- That's it for the breadth layer — no git, no Node, no Python.
+- The optional depth layer adds its own requirements: `uvx` (from [uv](https://github.com/astral-sh/uv)) to run browser-use locally, an `OPENAI_API_KEY`, and a local Chromium that browser-use manages. See **Optional depth layer (browser-use)** above. None of this is needed for breadth.
 
 ## License
 
