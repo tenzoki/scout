@@ -1,6 +1,6 @@
 {
   "name": "scout",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Web research plugin for Claude Code. One agent (scout) runs breadth-first multi-source research with inline cross-source verification and writes a single cited report per run. Two-layer model: a breadth core that works immediately with no setup, and an optional depth layer (registered separately) for pages that need an interactive browser. Returns a compact cited summary plus the report path. Dispatch with `claude --agent scout:scout`.",
   "author": {
     "name": "Kai / qantr GmbH"

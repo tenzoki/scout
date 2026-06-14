@@ -103,7 +103,21 @@ It is **entirely optional**. If you never register it, scout runs breadth-only a
 
 ### Register the MCP server
 
-**Easiest path:** run the `/scout:setup` skill. It registers the server for you with the `0.11.9` pin and both no-cloud env vars baked in, checks `uvx`, and prompts for your OpenAI key (it never writes the key into the repo). The manual JSON block below is the alternative if you would rather edit your MCP settings yourself.
+**Easiest path:** run the `/scout:setup` skill. It registers the server for you with the `0.11.9` pin and both no-cloud env vars baked in, checks `uvx`, and prompts for your OpenAI key (it never writes the key into the repo).
+
+**Run the script directly (technical users):** the registration mechanics live in one script, `skills/setup/register-browser-use.sh`, which `/scout:setup` simply drives. You can run it yourself:
+
+```bash
+# Inherit OPENAI_API_KEY from your environment (no key written into the config):
+BROWSERUSE_INHERIT=1 bash ~/.scout/skills/setup/register-browser-use.sh
+
+# Or pin a specific key into the user-scope MCP config:
+BROWSERUSE_OPENAI_KEY=sk-... bash ~/.scout/skills/setup/register-browser-use.sh
+```
+
+Run with neither variable on an interactive terminal and it offers inherit (when `OPENAI_API_KEY` is set) or prompts for a key with hidden input. It never writes the key to a file or echoes it. (Adjust the path if you set `SCOUT_HOME`.)
+
+The manual JSON block below is the ultimate fallback if you would rather edit your MCP settings yourself.
 
 Add this to your Claude Code MCP settings. It runs browser-use locally via `uvx`, pinned to the version scout is tested against:
 

@@ -11,6 +11,8 @@ This skill registers the **browser-use** MCP server so scout can drive a real lo
 
 The skill is **idempotent** and **non-destructive**: if `browser-use` is already registered, re-running removes the old user-scope entry and re-adds it with the tested pin and env vars (so a stale or broken registration is cleanly replaced); it never touches a server you registered at another scope, never deletes a project file, and never writes your OpenAI key into the repo.
 
+The registration mechanics — the pin `browser-use[cli]@0.11.9`, both no-cloud env vars, the remove-then-add, and the verify — live in **one place**: `${CLAUDE_PLUGIN_ROOT}/skills/setup/register-browser-use.sh`. This skill drives the conversation and the key decision, then invokes that script. The script is the single source of truth for the registration command, so the pin and env vars are never duplicated in prose here. A technical user can also run the script directly without this skill.
+
 Apply scout's short-form voice for everything you say to the user: read `${CLAUDE_PLUGIN_ROOT}/stilwerk/chat-voice-en.yaml` (or the target-language variant) and follow its intent — action-first, second person, plain words, no AI stock phrases. If no variant exists for the user's language, read the `-en` file and apply its intent in that language.
 
 ## Step 1 — State what this does, plainly
@@ -24,6 +26,8 @@ Tell the user, up front:
 
 ## Step 2 — Check prerequisites (stop cleanly if missing)
 
+The script checks prerequisites itself and stops cleanly if either is missing, but check here too so you can explain the fix in scout's voice before handing off:
+
 ```bash
 command -v claude >/dev/null 2>&1 && echo "claude: ok" || echo "claude: MISSING"
 command -v uvx    >/dev/null 2>&1 && echo "uvx: ok"    || echo "uvx: MISSING"
@@ -34,13 +38,13 @@ command -v uvx    >/dev/null 2>&1 && echo "uvx: ok"    || echo "uvx: MISSING"
 
 Only continue when both report `ok`.
 
-If the server is already registered, Step 4 removes the old user-scope entry and re-adds it with the tested config (the CLI's `add`/`add-json` refuse to overwrite an existing server, so a clean remove-then-add is what makes the re-run replace it) — say so and continue:
+If the server is already registered, the script removes the old user-scope entry and re-adds it with the tested config (the CLI's `add`/`add-json` refuse to overwrite an existing server, so a clean remove-then-add is what makes the re-run replace it) — say so and continue:
 
 ```bash
 claude mcp get browser-use >/dev/null 2>&1 && echo "browser-use: already registered (will re-register with the tested pin)" || echo "browser-use: not yet registered"
 ```
 
-## Step 3 — Obtain the OpenAI key (never hardcode it, never write it into the repo)
+## Step 3 — Decide the OpenAI key path (never hardcode it, never write it into the repo)
 
 The depth layer's two LLM-using tools — `browser_extract_content` (turn a page into structured text) and `retry_with_browser_use_agent` (the last-resort internal loop) — call an LLM. `browser_extract_content` is hardwired to OpenAI at the MCP layer in this version, so the key is an `OPENAI_API_KEY`. This is an ordinary external LLM call, the same kind scout already makes; it is not a "no cloud" violation (the no-cloud rule bans browser-use's hosted *service*, not external LLMs).
 
@@ -50,73 +54,34 @@ Prefer a key already in the environment. Check whether one is set, **without pri
 if [ -n "${OPENAI_API_KEY:-}" ]; then echo "OPENAI_API_KEY: present in environment (length ${#OPENAI_API_KEY})"; else echo "OPENAI_API_KEY: not set"; fi
 ```
 
-- **If present:** confirm with the user via `AskUserQuestion` that scout should use the key already in their environment for the depth layer. If they say yes, register the server **without** an explicit `OPENAI_API_KEY` env entry so the running session inherits it from the environment — that way the key never lands in the MCP config file. (If you prefer it pinned into the config, ask; then register with the key as shown in Step 4's key-supplied variant.)
-- **If not set:** ask the user to supply their OpenAI key. Read it from them directly. **Never** echo the full key back into chat, never write it into any file in the repo, and never put it in a commit. It goes only into Claude Code's user-scope MCP config via the registration command in Step 4.
+Make the decision with the user via `AskUserQuestion`, then carry it into Step 4:
 
-Whichever path: never print, log, or commit the full key.
+- **If present:** ask whether scout should **inherit** the key already in their environment (recommended — the key then never lands in the MCP config file, and never appears in any process argument) or **pin** it into the config. Inherit is the default. If they choose inherit, you will invoke the script with `BROWSERUSE_INHERIT=1`. If they choose pin, collect the key as below.
+- **If not set:** ask the user to supply their OpenAI key via `AskUserQuestion`. Read it from them directly. You will pass it to the script via the `BROWSERUSE_OPENAI_KEY` env var in Step 4 — it goes only into Claude Code's user-scope MCP config.
 
-## Step 4 — Register the server (verified mechanism)
+Whichever path: **never** echo the full key back into chat, never write it into any file in the repo, and never put it in a commit.
 
-Register the server under the **exact** name `browser-use`. The name is coupled to scout's allow-list: scout's tools are named `mcp__browser-use__browser_navigate`, `mcp__browser-use__browser_get_state`, and so on. If you register under a different name, scout cannot see the depth tools and silently falls back to breadth-only. Use the name `browser-use`.
+## Step 4 — Register the server (invoke the script)
 
-The pin is `browser-use[cli]@0.11.9` — the version scout's depth layer is built and verified against. Both no-cloud env vars are mandatory: `ANONYMIZED_TELEMETRY=False` and `BROWSER_USE_VERSION_CHECK=false`. They disable browser-use's two on-by-default outbound pings (the PostHog telemetry call and the version-check call). Without them, the server quietly phones home on startup. Include both, every time.
+Invoke the single-source-of-truth script. It removes any existing user-scope `browser-use`, adds it fresh under the **exact** name `browser-use` (coupled to scout's allow-list: scout's tools are `mcp__browser-use__browser_navigate`, `mcp__browser-use__browser_get_state`, and so on — a different name means scout silently falls back to breadth-only), at **user scope** so depth works from any project directory, with the tested pin and both mandatory no-cloud env vars baked in, and then verifies.
 
-Register at **user scope** (`-s user`) so depth works from any project directory, not just the current one.
+Pass the key decision from Step 3 via env so nothing key-shaped is typed into a visible command line by hand:
 
-**First, clear any existing user-scope registration.** The CLI's `add`/`add-json` refuse to overwrite an existing server (`add-json` prints "already exists" and keeps the OLD config; `add` exits 1), so a re-run would otherwise silently keep a stale or broken entry. Remove the user-scope `browser-use` first, then add fresh:
-
-```bash
-claude mcp remove browser-use -s user >/dev/null 2>&1 || true
-```
-
-Scope the remove to `-s user` so it only touches the registration this skill owns — a `browser-use` server the user deliberately set up at project or local scope is left untouched. The `|| true` keeps a first run (nothing to remove) from erroring. After this remove, run one of the add forms below.
-
-**Primary mechanism — `claude mcp add-json` (reproduces the README JSON block exactly).**
-
-If the user has a key to pin into the config (Step 3 "not set" path, or they chose to pin it):
+**Environment-inherit path** (user chose to inherit an existing `OPENAI_API_KEY`):
 
 ```bash
-claude mcp add-json browser-use -s user '{
-  "type": "stdio",
-  "command": "uvx",
-  "args": ["browser-use[cli]@0.11.9", "--mcp"],
-  "env": {
-    "OPENAI_API_KEY": "PASTE_THE_KEY_HERE",
-    "ANONYMIZED_TELEMETRY": "False",
-    "BROWSER_USE_VERSION_CHECK": "false"
-  }
-}'
+BROWSERUSE_INHERIT=1 bash "${CLAUDE_PLUGIN_ROOT}/skills/setup/register-browser-use.sh"
 ```
 
-Substitute the real key for `PASTE_THE_KEY_HERE` only in the actual command you run; never display the substituted command back to the user with the key in it.
-
-If the user confirmed an environment key should be inherited (Step 3 "present" path), omit the `OPENAI_API_KEY` entry so the session inherits it:
+**Pinned-key path** (user supplied a key to write into the config):
 
 ```bash
-claude mcp add-json browser-use -s user '{
-  "type": "stdio",
-  "command": "uvx",
-  "args": ["browser-use[cli]@0.11.9", "--mcp"],
-  "env": {
-    "ANONYMIZED_TELEMETRY": "False",
-    "BROWSER_USE_VERSION_CHECK": "false"
-  }
-}'
+BROWSERUSE_OPENAI_KEY="<the key the user supplied>" bash "${CLAUDE_PLUGIN_ROOT}/skills/setup/register-browser-use.sh"
 ```
 
-**Equivalent flag form** (`claude mcp add` with `-e KEY=value`), if you prefer it — same result, same pin, same env, same user scope:
+Substitute the real key only in the actual command you run; never display the substituted command back to the user with the key in it. The script prints its own prerequisite, registration, and verification output.
 
-```bash
-claude mcp add browser-use uvx -s user \
-  -e OPENAI_API_KEY="PASTE_THE_KEY_HERE" \
-  -e ANONYMIZED_TELEMETRY=False \
-  -e BROWSER_USE_VERSION_CHECK=false \
-  -- "browser-use[cli]@0.11.9" --mcp
-```
-
-(Drop the `OPENAI_API_KEY` line for the environment-inherit path.)
-
-**Fallback — if neither CLI form works in this Claude Code version**: print the exact JSON `mcpServers` block from the README for the user to paste into their MCP settings by hand, and tell them plainly that you are falling back to the manual paste because the CLI registration was unavailable:
+**Fallback — if the script cannot run in this environment** (e.g. the CLI registration forms fail in this Claude Code version): print the exact JSON `mcpServers` block below for the user to paste into their MCP settings by hand, and tell them plainly that you are falling back to the manual paste because the scripted registration was unavailable:
 
 ```json
 {
@@ -134,19 +99,13 @@ claude mcp add browser-use uvx -s user \
 }
 ```
 
-Do not guess a different registration command. Use one of the verified forms above, or the manual JSON block.
+Do not guess a different registration command. Use the script, or the manual JSON block.
 
-## Step 5 — Verify the registration took
+## Step 5 — Confirm the registration took
 
-Confirm the server is registered with the right type, command, args, and env:
+The script ends by running `claude mcp get browser-use` and printing the result. Read its output: it should show `Type: stdio`, `Command: uvx`, args including `browser-use[cli]@0.11.9` and `--mcp`, and the env carrying `ANONYMIZED_TELEMETRY` and `BROWSER_USE_VERSION_CHECK`. Do not print any `OPENAI_API_KEY` value from this output.
 
-```bash
-claude mcp get browser-use 2>&1
-```
-
-Check the output shows `Type: stdio`, `Command: uvx`, args including `browser-use[cli]@0.11.9` and `--mcp`, and the env carrying `ANONYMIZED_TELEMETRY` and `BROWSER_USE_VERSION_CHECK`. (`claude mcp list` also lists it among the configured servers.) Do not print any `OPENAI_API_KEY` value from this output.
-
-If the entry is missing or wrong, the registration did not take — report the actual `claude mcp get` output and stop so the user can retry, rather than reporting a false success.
+If the entry is missing or wrong, the registration did not take — report the actual script output and stop so the user can retry, rather than reporting a false success.
 
 On success, tell the user: depth is registered. Re-run scout — pages that need an interactive browser will now be driven in a real local Chromium, and depth findings will carry the `depth (browser-use, manual drive)` method tag in the report.
 
