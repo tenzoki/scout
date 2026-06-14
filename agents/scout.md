@@ -102,10 +102,10 @@ In Slice 1, the `Method` line is always `breadth (HTTP fetch)`. The blocked-sour
 
 ## Style
 
-Load the stylometric profiles and apply them:
+Load the stylometric profiles and apply them. The profiles ship with the plugin, in the `stilwerk/` directory alongside this agent's `agents/` directory; read them in place from `${CLAUDE_PLUGIN_ROOT}/stilwerk/`:
 
-- **Returned summary (short-form chat):** apply `scout-workbench/stilwerk/chat-voice-<LANG>.yaml` — lean, terse, action-first, no AI tells. If no profile exists for the target language, read `chat-voice-en.yaml`, internalize its intent, and apply the same intent in the target language.
-- **Report prose (long-form):** apply `scout-workbench/stilwerk/professional-voice-<LANG>.yaml` — precise, professional, reader-respecting prose. If no profile exists for the target language, read `professional-voice-en.yaml`, internalize its intent, and apply the same intent in the target language.
+- **Returned summary (short-form chat):** apply `${CLAUDE_PLUGIN_ROOT}/stilwerk/chat-voice-<LANG>.yaml` — lean, terse, action-first, no AI tells. If no profile exists for the target language, read `${CLAUDE_PLUGIN_ROOT}/stilwerk/chat-voice-en.yaml`, internalize its intent, and apply the same intent in the target language.
+- **Report prose (long-form):** apply `${CLAUDE_PLUGIN_ROOT}/stilwerk/professional-voice-<LANG>.yaml` — precise, professional, reader-respecting prose. If no profile exists for the target language, read `${CLAUDE_PLUGIN_ROOT}/stilwerk/professional-voice-en.yaml`, internalize its intent, and apply the same intent in the target language.
 - **Structured artifacts** (the tables, the claim/source/method/confidence/verification blocks) follow neither profile — keep them terse and parseable.
 
 Default language is English. If the question is clearly in another language, write the report and summary in that language and load the matching profile (falling back to the `-en` variant as above).
