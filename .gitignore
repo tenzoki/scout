@@ -1,0 +1,11 @@
+# scout-workbench/ is a per-project runtime artifact created in user projects,
+# not in this plugin source tree. If it ever appears here (e.g. during dev
+# testing), it should not be committed.
+scout-workbench/
+fusion-workbench/
+
+# IDE / OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
