@@ -103,6 +103,8 @@ It is **entirely optional**. If you never register it, scout runs breadth-only a
 
 ### Register the MCP server
 
+**Easiest path:** run the `/scout:setup` skill. It registers the server for you with the `0.11.9` pin and both no-cloud env vars baked in, checks `uvx`, and prompts for your OpenAI key (it never writes the key into the repo). The manual JSON block below is the alternative if you would rather edit your MCP settings yourself.
+
 Add this to your Claude Code MCP settings. It runs browser-use locally via `uvx`, pinned to the version scout is tested against:
 
 ```json

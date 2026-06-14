@@ -65,7 +65,7 @@ say "Installing to $INSTALL_DIR ..."
 rm -rf "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
 # Copy only the plugin assets — never any dev cruft.
-for item in .claude-plugin agents stilwerk README.md LICENSE; do
+for item in .claude-plugin agents skills stilwerk README.md LICENSE; do
   [ -e "$SRC/$item" ] && cp -R "$SRC/$item" "$INSTALL_DIR/"
 done
 [ -f "$INSTALL_DIR/.claude-plugin/plugin.json" ] || die "Install copy failed."
