@@ -1,0 +1,15 @@
+use_default_settings: true
+search:
+  # json output is REQUIRED by the mcp-searxng MCP server. The default SearXNG
+  # image ships `html` only; without `json` the MCP breaks. Do not remove json.
+  formats:
+    - html
+    - json
+server:
+  # No secret is committed. The `scout meta` launcher generates a real key with
+  # `openssl rand -hex 32` into the INSTALLED copy of this file on first start
+  # (the repo file always ships empty). See install.sh `meta)` arm.
+  secret_key: ""
+  # limiter off: single-user localhost (scout meta) is fine. If you expose this
+  # SearXNG on a shared or public host, re-enable the limiter (set to true).
+  limiter: false
