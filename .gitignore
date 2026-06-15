@@ -4,6 +4,10 @@
 scout-workbench/
 fusion-workbench/
 
+# Internal build notes — kept inside the working tree but out of the public repo
+CLAUDE.md
+activity-log-kai.md
+
 # IDE / OS noise
 .DS_Store
 .idea/
