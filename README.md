@@ -164,6 +164,50 @@ When scout hits a wall on a source it judges essential — a captcha, a login, a
 
 The wall becomes structured information you act on out-of-band, not a silent gap and not a budget-burning captcha loop.
 
+## Optional metasearch backend (SearXNG)
+
+scout can discover URLs through a **self-hosted [SearXNG](https://github.com/searxng/searxng) metasearch engine** instead of the built-in `WebSearch`. SearXNG aggregates many search engines behind one private, local endpoint — useful when you want self-hosted, privacy-respecting discovery.
+
+It is a **discovery backend, not a fetcher.** SearXNG only finds URLs; `WebFetch` and the optional depth layer still do all content fetching. The fetch path is unchanged.
+
+It is **entirely optional and opt-in.** Default `scout` is unchanged and **zero-dependency** — it discovers with `WebSearch` and needs no Docker, no MCP, nothing extra. If you never enable SearXNG, you lose nothing. scout falls back to `WebSearch` on **any** absence cause — not in `meta` mode, container not running, Docker missing, MCP not registered — and never fails because SearXNG is absent.
+
+### Enable it — two coupled steps
+
+SearXNG needs both an MCP registration and a running container:
+
+1. **Register the MCP** — run `/scout:setup` (it offers SearXNG alongside browser-use) or run the script directly:
+
+   ```bash
+   bash ~/.scout/skills/setup/register-searxng.sh
+   ```
+
+   This registers the `searxng` MCP server under the user scope, pointed at `http://localhost:8911`, with no API key (self-hosted needs none). It writes no secret.
+
+2. **Start the container** — launch scout with the `meta` flag:
+
+   ```bash
+   scout meta     # starts the local SearXNG Docker container, then launches scout
+   ```
+
+   `scout meta` brings up the container (`docker compose up -d` against the bundled `services/searxng/docker-compose.yml`), waits for it to report healthy, then launches scout. If Docker is missing, the container fails to start, or the health-wait times out, it prints a plain message naming the cause and launches scout with `WebSearch` instead — it never hard-fails.
+
+Plain `scout` (without `meta`) never touches SearXNG. When SearXNG is registered **and** the container is up, scout discovers through it and each source in the report carries a `discovery: searxng` note; otherwise sources carry `discovery: websearch`.
+
+### `json` output is required
+
+The bundled SearXNG settings enable `json` output (`search.formats: [html, json]`). The default SearXNG image ships `html` only, and the `mcp-searxng` MCP needs `json` — without it the MCP breaks. The shipped `services/searxng/config/settings.yml` already has this; do not remove it.
+
+### The secret is generated per deployment — never shipped
+
+SearXNG needs a `server.secret_key`. scout **does not ship one** — the committed `settings.yml` carries an empty `secret_key`. On the first `scout meta` start, the launcher generates a real key (`openssl rand -hex 32`) into your **installed** copy at `~/.scout/services/searxng/config/settings.yml`. The repo never contains a real secret, and every deployment gets its own. (If `openssl` is missing, the launcher says so and falls back to WebSearch rather than starting with a blank key.)
+
+The bundled settings also set `limiter: false`, which is fine for single-user localhost. If you expose this SearXNG on a shared or public host, re-enable the limiter.
+
+### Server name and tool prefix must match
+
+The MCP server name `searxng` must equal the `mcp__searxng__` prefix in scout's tool allow-list (`agents/scout.md`). `register-searxng.sh` registers it under exactly `searxng`. If you register it under a different name, scout cannot see the discovery tool and silently falls back to WebSearch — keep the name `searxng`.
+
 ## Language
 
 Default is English. scout ships professional-voice style profiles (for the report prose) and chat-voice profiles (for the compact summary it returns) in English and German. For other languages, it reads the English profile and applies the same intent in the target language.
@@ -171,8 +215,9 @@ Default is English. scout ships professional-voice style profiles (for the repor
 ## Requirements
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) v2.0.12 or higher.
-- That's it for the breadth layer — no git, no Node, no Python.
+- That's it for the breadth layer — no git, no Node, no Python, no Docker.
 - The optional depth layer adds its own requirements: `uvx` (from [uv](https://github.com/astral-sh/uv)) to run browser-use locally, an `OPENAI_API_KEY`, and a local Chromium that browser-use manages. See **Optional depth layer (browser-use)** above. None of this is needed for breadth.
+- The optional SearXNG meta backend needs `npx` (from [Node.js](https://nodejs.org)) to run the MCP, and **Docker** to run the container via `scout meta`. Docker is needed **only** for `meta` — never for the default `scout` path. See **Optional metasearch backend (SearXNG)** above.
 
 ## License
 
