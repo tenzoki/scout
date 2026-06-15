@@ -103,32 +103,37 @@ It is **entirely optional**. If you never register it, scout runs breadth-only a
 
 ### Register the MCP server
 
-**Easiest path:** run the `/scout:setup` skill. It registers the server for you with the `0.11.9` pin and both no-cloud env vars baked in, checks `uvx`, and prompts for your OpenAI key (it never writes the key into the repo).
+**Easiest path:** run the `/scout:setup` skill. It registers the server for you with the `0.11.9` pin and both no-cloud env vars baked in, checks `uvx`, and prompts for your Anthropic key (it never writes the key into the repo).
 
 **Run the script directly (technical users):** the registration mechanics live in one script, `skills/setup/register-browser-use.sh`, which `/scout:setup` simply drives. You can run it yourself:
 
 ```bash
-# Inherit OPENAI_API_KEY from your environment (no key written into the config):
+# Inherit ANTHROPIC_API_KEY from your environment (no key written into the config):
 BROWSERUSE_INHERIT=1 bash ~/.scout/skills/setup/register-browser-use.sh
 
 # Or pin a specific key into the user-scope MCP config:
-BROWSERUSE_OPENAI_KEY=sk-... bash ~/.scout/skills/setup/register-browser-use.sh
+BROWSERUSE_ANTHROPIC_KEY=sk-ant-... bash ~/.scout/skills/setup/register-browser-use.sh
 ```
 
-Run with neither variable on an interactive terminal and it offers inherit (when `OPENAI_API_KEY` is set) or prompts for a key with hidden input. It never writes the key to a file or echoes it. (Adjust the path if you set `SCOUT_HOME`.)
+Run with neither variable on an interactive terminal and it offers inherit (when `ANTHROPIC_API_KEY` is set) or prompts for a key with hidden input. It never writes the key to a file or echoes it. (Adjust the path if you set `SCOUT_HOME`.)
 
 The manual JSON block below is the ultimate fallback if you would rather edit your MCP settings yourself.
 
-Add this to your Claude Code MCP settings. It runs browser-use locally via `uvx`, pinned to the version scout is tested against:
+Add this to your Claude Code MCP settings. It runs browser-use locally via `uvx`, pinned to the version scout is tested against, through scout's Anthropic shim:
 
 ```json
 {
   "mcpServers": {
     "browser-use": {
       "command": "uvx",
-      "args": ["browser-use[cli]@0.11.9", "--mcp"],
+      "args": [
+        "--from", "browser-use[cli]@0.11.9",
+        "python", "${CLAUDE_PLUGIN_ROOT}/services/browser-use-anthropic/scout_browseruse_anthropic.py",
+        "--mcp"
+      ],
       "env": {
-        "OPENAI_API_KEY": "<your own OpenAI API key>",
+        "ANTHROPIC_API_KEY": "<your own Anthropic API key>",
+        "SCOUT_DEPTH_PROVIDER": "anthropic",
         "ANONYMIZED_TELEMETRY": "False",
         "BROWSER_USE_VERSION_CHECK": "false"
       }
@@ -137,17 +142,19 @@ Add this to your Claude Code MCP settings. It runs browser-use locally via `uvx`
 }
 ```
 
-The pin is `0.11.9` — the version scout's depth layer is built and verified against. A version bump is a deliberate, tested change, not an automatic track.
+The pin is `0.11.9` — the version scout's depth layer is built and verified against. A version bump is a deliberate, tested change, not an automatic track. The `--from "browser-use[cli]@0.11.9" python <shim>` form runs the exact tested browser-use, but launches scout's thin shim inside that environment so extraction lands on Anthropic. Both no-cloud env vars stay in this snippet — keep them in every one. (`SCOUT_DEPTH_EXTRACT_MODEL` is optional; it overrides the default `claude-3-5-haiku-latest` extraction model.)
 
 ### Both no-cloud environment variables are mandatory
 
 `ANONYMIZED_TELEMETRY=False` and `BROWSER_USE_VERSION_CHECK=false` **must appear in every documented snippet**, here and anywhere else you register the server. They disable browser-use's two on-by-default outbound pings — the PostHog telemetry call and the version-check call. Without them, registering the server quietly phones home on startup. Do not omit either one.
 
-### You need your own OpenAI API key
+### You need your own Anthropic API key
 
-The depth layer's two LLM-using tools — `browser_extract_content` (turn a page into structured text) and `retry_with_browser_use_agent` (the last-resort internal loop) — call an LLM, and you supply the key via `OPENAI_API_KEY`. `browser_extract_content` is **hardwired to OpenAI** at the MCP layer in this version, so an OpenAI mini model is the default.
+The depth layer's main LLM-using tool, `browser_extract_content` (turn a page into structured text), calls an LLM, and you supply the key via `ANTHROPIC_API_KEY`. Stock browser-use `0.11.9` hardwires that extraction call to OpenAI at the MCP layer. scout ships a small runtime shim (`services/browser-use-anthropic/scout_browseruse_anthropic.py`) that rebinds the extraction LLM to Anthropic, so a fast Claude model (`claude-3-5-haiku-latest` by default) handles extraction and you need only an Anthropic key. Override the model with `SCOUT_DEPTH_EXTRACT_MODEL`.
 
-This is not a "no cloud" violation. scout's no-cloud rule bans browser-use's **hosted service** (browser-use Cloud) — the browser runs entirely on your machine. The LLM call for content extraction is an ordinary external LLM call, the same kind scout makes for everything else. (Routing extraction through Anthropic instead of OpenAI needs an upstream browser-use patch and is out of scope here.)
+The shim patches **extraction only**. The last-resort internal loop, `retry_with_browser_use_agent`, stays OpenAI/Bedrock-only upstream; if you reach for it you still need an OpenAI or Bedrock key.
+
+This is not a "no cloud" violation. scout's no-cloud rule bans browser-use's **hosted service** (browser-use Cloud) — the browser runs entirely on your machine. The LLM call for content extraction is an ordinary external LLM call, the same kind scout makes for everything else.
 
 ### Server name and tool prefix must match
 
@@ -216,7 +223,7 @@ Default is English. scout ships professional-voice style profiles (for the repor
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) v2.0.12 or higher.
 - That's it for the breadth layer — no git, no Node, no Python, no Docker.
-- The optional depth layer adds its own requirements: `uvx` (from [uv](https://github.com/astral-sh/uv)) to run browser-use locally, an `OPENAI_API_KEY`, and a local Chromium that browser-use manages. See **Optional depth layer (browser-use)** above. None of this is needed for breadth.
+- The optional depth layer adds its own requirements: `uvx` (from [uv](https://github.com/astral-sh/uv)) to run browser-use locally, an `ANTHROPIC_API_KEY` (extraction runs on Anthropic via scout's shim), and a local Chromium that browser-use manages. See **Optional depth layer (browser-use)** above. None of this is needed for breadth.
 - The optional SearXNG meta backend needs `npx` (from [Node.js](https://nodejs.org)) to run the MCP, and **Docker** to run the container via `scout meta`. Docker is needed **only** for `meta` — never for the default `scout` path. See **Optional metasearch backend (SearXNG)** above.
 
 ## License

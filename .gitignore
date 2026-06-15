@@ -13,3 +13,7 @@ activity-log-kai.md
 .idea/
 .vscode/
 *.swp
+
+# Python artifacts (the browser-use Anthropic shim)
+__pycache__/
+*.pyc

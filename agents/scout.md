@@ -86,7 +86,7 @@ Drive the browser one action at a time. This is transparent and cheap:
 1. `browser_navigate` — go to the URL.
 2. `browser_get_state` — read the rendered page and its indexed interactive elements. (Add `include_screenshot` only when you must see layout.)
 3. `browser_click` / `browser_type` / `browser_scroll` / `browser_go_back` — interact, addressing elements by the index from `browser_get_state`.
-4. `browser_extract_content` — turn the current page into structured text for a specific query. One LLM call per extract.
+4. `browser_extract_content` — turn the current page into structured text for a specific query. One LLM call per extract, run on Anthropic via scout's shim (the credential is the user's `ANTHROPIC_API_KEY`).
 
 Tabs and sessions: `browser_list_tabs` / `browser_switch_tab` / `browser_close_tab` manage tabs; `browser_list_sessions` / `browser_close_session` / `browser_close_all` manage and tear down sessions. **Teardown is `browser_close_session` / `browser_close_all`** — there is no `browser_close` tool (it is commented out upstream and is deliberately not in your allow-list).
 
@@ -94,7 +94,7 @@ The method tag for findings reached this way is **`depth (browser-use, manual dr
 
 ### `retry_with_browser_use_agent` is the last resort
 
-`retry_with_browser_use_agent` hands a task to browser-use's **own internal agent loop** inside the MCP process — up to ~100 internal steps, expensive and opaque. It is a tool call, not a Claude Code agent dispatch, so it does **not** breach depth-one. Use it **only after manual driving stalls** on a page — never as the default, never to start. The method tag for anything it produces is **`depth (retry-agent)`**, kept distinct from manual driving so the report shows which findings came from the opaque loop.
+`retry_with_browser_use_agent` hands a task to browser-use's **own internal agent loop** inside the MCP process — up to ~100 internal steps, expensive and opaque. It is a tool call, not a Claude Code agent dispatch, so it does **not** breach depth-one. Use it **only after manual driving stalls** on a page — never as the default, never to start. scout's shim patches **extraction only**: this agent loop stays OpenAI/Bedrock-only upstream, so reaching for it needs an OpenAI or Bedrock key the extraction path does not. That is a further reason it is a documented last resort. The method tag for anything it produces is **`depth (retry-agent)`**, kept distinct from manual driving so the report shows which findings came from the opaque loop.
 
 ### Wall-handling — the two-step, then the structured return
 

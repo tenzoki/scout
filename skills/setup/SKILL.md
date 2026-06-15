@@ -1,5 +1,5 @@
 ---
-description: Set up scout's optional add-ons by registering their MCP servers, so a non-technical user does not hand-edit Claude Code's MCP config. Covers two optional layers — the browser-use depth layer (interactive browsing) and the SearXNG meta discovery backend (self-hosted metasearch). Invoke when the user wants to "set up scout depth", "enable interactive browsing", "register browser-use", "turn on the depth layer", "let scout drive a real browser", "set up scout meta", "enable SearXNG", or "register the metasearch backend". browser-use registers a local Chromium stack pinned to the tested version with both no-cloud env vars and an OpenAI key the user supplies; SearXNG registers the self-hosted metasearch MCP (no key). Idempotent and non-destructive — both layers are entirely OPTIONAL; scout works breadth-only with WebSearch without either.
+description: Set up scout's optional add-ons by registering their MCP servers, so a non-technical user does not hand-edit Claude Code's MCP config. Covers two optional layers — the browser-use depth layer (interactive browsing) and the SearXNG meta discovery backend (self-hosted metasearch). Invoke when the user wants to "set up scout depth", "enable interactive browsing", "register browser-use", "turn on the depth layer", "let scout drive a real browser", "set up scout meta", "enable SearXNG", or "register the metasearch backend". browser-use registers a local Chromium stack pinned to the tested version with both no-cloud env vars and an Anthropic key the user supplies (extraction runs on Anthropic via scout's shim); SearXNG registers the self-hosted metasearch MCP (no key). Idempotent and non-destructive — both layers are entirely OPTIONAL; scout works breadth-only with WebSearch without either.
 allowed-tools: [Bash, Read, AskUserQuestion]
 ---
 
@@ -18,7 +18,7 @@ This registers the **browser-use** MCP server so scout can drive a real local Ch
 
 **Depth is optional.** scout runs fine breadth-only. Without depth registered, scout records any page that genuinely needs an interactive browser as a "needs depth tools" gap in its report's blocked-sources table — it never silently drops a source. Run this skill only if you actually hit such pages.
 
-The skill is **idempotent** and **non-destructive**: if `browser-use` is already registered, re-running removes the old user-scope entry and re-adds it with the tested pin and env vars (so a stale or broken registration is cleanly replaced); it never touches a server you registered at another scope, never deletes a project file, and never writes your OpenAI key into the repo.
+The skill is **idempotent** and **non-destructive**: if `browser-use` is already registered, re-running removes the old user-scope entry and re-adds it with the tested pin and env vars (so a stale or broken registration is cleanly replaced); it never touches a server you registered at another scope, never deletes a project file, and never writes your Anthropic key into the repo.
 
 The registration mechanics — the pin `browser-use[cli]@0.11.9`, both no-cloud env vars, the remove-then-add, and the verify — live in **one place**: `${CLAUDE_PLUGIN_ROOT}/skills/setup/register-browser-use.sh`. This skill drives the conversation and the key decision, then invokes that script. The script is the single source of truth for the registration command, so the pin and env vars are never duplicated in prose here. A technical user can also run the script directly without this skill.
 
@@ -30,7 +30,7 @@ Tell the user, up front:
 
 - This registers a local browser-use server so scout can drive a real Chromium browser when a page needs it.
 - Depth is optional. scout already works breadth-only; this only adds the interactive-browser path.
-- The browser runs entirely on their machine. No browser-use hosted cloud service. The only outbound call the depth layer makes is an ordinary OpenAI LLM call for content extraction (Step 3).
+- The browser runs entirely on their machine. No browser-use hosted cloud service. The only outbound call the depth layer makes is an ordinary Anthropic LLM call for content extraction (Step 3), which runs on Anthropic via scout's shim.
 - Nothing installs silently. If a prerequisite is missing, the skill stops and points them at the install page.
 
 ## Step 2 — Check prerequisites (stop cleanly if missing)
@@ -53,20 +53,20 @@ If the server is already registered, the script removes the old user-scope entry
 claude mcp get browser-use >/dev/null 2>&1 && echo "browser-use: already registered (will re-register with the tested pin)" || echo "browser-use: not yet registered"
 ```
 
-## Step 3 — Decide the OpenAI key path (never hardcode it, never write it into the repo)
+## Step 3 — Decide the Anthropic key path (never hardcode it, never write it into the repo)
 
-The depth layer's two LLM-using tools — `browser_extract_content` (turn a page into structured text) and `retry_with_browser_use_agent` (the last-resort internal loop) — call an LLM. `browser_extract_content` is hardwired to OpenAI at the MCP layer in this version, so the key is an `OPENAI_API_KEY`. This is an ordinary external LLM call, the same kind scout already makes; it is not a "no cloud" violation (the no-cloud rule bans browser-use's hosted *service*, not external LLMs).
+The depth layer's extraction tool, `browser_extract_content` (turn a page into structured text), calls an LLM. scout's shim runs that call on Anthropic, so the key is an `ANTHROPIC_API_KEY`. This is an ordinary external LLM call, the same kind scout already makes; it is not a "no cloud" violation (the no-cloud rule bans browser-use's hosted *service*, not external LLMs). The last-resort `retry_with_browser_use_agent` loop stays OpenAI/Bedrock-only upstream — the shim patches extraction, not the agent loop — so reaching for it still needs an OpenAI or Bedrock key.
 
 Prefer a key already in the environment. Check whether one is set, **without printing it**:
 
 ```bash
-if [ -n "${OPENAI_API_KEY:-}" ]; then echo "OPENAI_API_KEY: present in environment (length ${#OPENAI_API_KEY})"; else echo "OPENAI_API_KEY: not set"; fi
+if [ -n "${ANTHROPIC_API_KEY:-}" ]; then echo "ANTHROPIC_API_KEY: present in environment (length ${#ANTHROPIC_API_KEY})"; else echo "ANTHROPIC_API_KEY: not set"; fi
 ```
 
 Make the decision with the user via `AskUserQuestion`, then carry it into Step 4:
 
 - **If present:** ask whether scout should **inherit** the key already in their environment (recommended — the key then never lands in the MCP config file, and never appears in any process argument) or **pin** it into the config. Inherit is the default. If they choose inherit, you will invoke the script with `BROWSERUSE_INHERIT=1`. If they choose pin, collect the key as below.
-- **If not set:** ask the user to supply their OpenAI key via `AskUserQuestion`. Read it from them directly. You will pass it to the script via the `BROWSERUSE_OPENAI_KEY` env var in Step 4 — it goes only into Claude Code's user-scope MCP config.
+- **If not set:** ask the user to supply their Anthropic key via `AskUserQuestion`. Read it from them directly. You will pass it to the script via the `BROWSERUSE_ANTHROPIC_KEY` env var in Step 4 — it goes only into Claude Code's user-scope MCP config.
 
 Whichever path: **never** echo the full key back into chat, never write it into any file in the repo, and never put it in a commit.
 
@@ -76,7 +76,7 @@ Invoke the single-source-of-truth script. It removes any existing user-scope `br
 
 Pass the key decision from Step 3 via env so nothing key-shaped is typed into a visible command line by hand:
 
-**Environment-inherit path** (user chose to inherit an existing `OPENAI_API_KEY`):
+**Environment-inherit path** (user chose to inherit an existing `ANTHROPIC_API_KEY`):
 
 ```bash
 BROWSERUSE_INHERIT=1 bash "${CLAUDE_PLUGIN_ROOT}/skills/setup/register-browser-use.sh"
@@ -85,7 +85,7 @@ BROWSERUSE_INHERIT=1 bash "${CLAUDE_PLUGIN_ROOT}/skills/setup/register-browser-u
 **Pinned-key path** (user supplied a key to write into the config):
 
 ```bash
-BROWSERUSE_OPENAI_KEY="<the key the user supplied>" bash "${CLAUDE_PLUGIN_ROOT}/skills/setup/register-browser-use.sh"
+BROWSERUSE_ANTHROPIC_KEY="<the key the user supplied>" bash "${CLAUDE_PLUGIN_ROOT}/skills/setup/register-browser-use.sh"
 ```
 
 Substitute the real key only in the actual command you run; never display the substituted command back to the user with the key in it. The script prints its own prerequisite, registration, and verification output.
@@ -97,9 +97,14 @@ Substitute the real key only in the actual command you run; never display the su
   "mcpServers": {
     "browser-use": {
       "command": "uvx",
-      "args": ["browser-use[cli]@0.11.9", "--mcp"],
+      "args": [
+        "--from", "browser-use[cli]@0.11.9",
+        "python", "${CLAUDE_PLUGIN_ROOT}/services/browser-use-anthropic/scout_browseruse_anthropic.py",
+        "--mcp"
+      ],
       "env": {
-        "OPENAI_API_KEY": "<your own OpenAI API key>",
+        "ANTHROPIC_API_KEY": "<your own Anthropic API key>",
+        "SCOUT_DEPTH_PROVIDER": "anthropic",
         "ANONYMIZED_TELEMETRY": "False",
         "BROWSER_USE_VERSION_CHECK": "false"
       }
@@ -112,7 +117,7 @@ Do not guess a different registration command. Use the script, or the manual JSO
 
 ## Step 5 — Confirm the registration took
 
-The script ends by running `claude mcp get browser-use` and printing the result. Read its output: it should show `Type: stdio`, `Command: uvx`, args including `browser-use[cli]@0.11.9` and `--mcp`, and the env carrying `ANONYMIZED_TELEMETRY` and `BROWSER_USE_VERSION_CHECK`. Do not print any `OPENAI_API_KEY` value from this output.
+The script ends by running `claude mcp get browser-use` and printing the result. Read its output: it should show `Type: stdio`, `Command: uvx`, args including `--from`, `browser-use[cli]@0.11.9`, the shim path `services/browser-use-anthropic/scout_browseruse_anthropic.py`, and `--mcp`, and the env carrying `SCOUT_DEPTH_PROVIDER`, `ANONYMIZED_TELEMETRY`, and `BROWSER_USE_VERSION_CHECK`. Do not print any `ANTHROPIC_API_KEY` value from this output.
 
 If the entry is missing or wrong, the registration did not take — report the actual script output and stop so the user can retry, rather than reporting a false success.
 
@@ -157,7 +162,7 @@ The script removes any existing user-scope `searxng`, adds it fresh under the **
 ## What this skill does NOT do
 
 - Does not install `uv`/`uvx`, `npx`/Node, Docker, Claude Code, or a browser — it only checks and points at the install page if missing.
-- Does not write your OpenAI key into any repo file, print it, or commit it. The SearXNG path writes no secret at all.
+- Does not write your Anthropic key into any repo file, print it, or commit it. The SearXNG path writes no secret at all.
 - Does not start the SearXNG container — that is `scout meta`'s job. This skill only registers the MCP.
 - Does not change scout's agent, plugin manifest, or style profiles.
 - Does not register anything if a prerequisite is missing — it stops cleanly.
