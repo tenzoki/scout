@@ -65,7 +65,7 @@ say "Installing to $INSTALL_DIR ..."
 rm -rf "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
 # Copy only the plugin assets — never any dev cruft.
-for item in .claude-plugin agents skills stilwerk README.md LICENSE; do
+for item in .claude-plugin agents skills services stilwerk README.md LICENSE; do
   [ -e "$SRC/$item" ] && cp -R "$SRC/$item" "$INSTALL_DIR/"
 done
 [ -f "$INSTALL_DIR/.claude-plugin/plugin.json" ] || die "Install copy failed."
@@ -91,6 +91,36 @@ case "\${1:-}" in
   --where)
     echo "\$SCOUT_DIR"
     exit 0
+    ;;
+  meta)
+    # Opt-in metasearch backend: start the local SearXNG container, then fall
+    # through to launch scout. Never registers the MCP (that is /scout:setup's
+    # job) and never hard-fails — any failure falls back to WebSearch.
+    COMPOSE="\$SCOUT_DIR/services/searxng/docker-compose.yml"
+    SETTINGS="\$SCOUT_DIR/services/searxng/config/settings.yml"
+    if ! command -v docker >/dev/null 2>&1; then
+      echo "scout meta: docker not found — SearXNG cannot start. Falling back to WebSearch." >&2
+    else
+      # Generate a real secret_key into the INSTALLED settings on first start if
+      # it is still empty/placeholder. Never touches the repo file.
+      if [ -f "\$SETTINGS" ] && grep -Eq '^[[:space:]]*secret_key:[[:space:]]*("")?[[:space:]]*\$|CHANGE_ME' "\$SETTINGS"; then
+        if command -v openssl >/dev/null 2>&1; then
+          SECRET="\$(openssl rand -hex 32)"
+          TMP_SETTINGS="\$(mktemp)"
+          sed "s|^\([[:space:]]*\)secret_key:.*|\1secret_key: \"\$SECRET\"|" "\$SETTINGS" > "\$TMP_SETTINGS" && mv "\$TMP_SETTINGS" "\$SETTINGS"
+        else
+          echo "scout meta: openssl not found — cannot generate SearXNG secret_key. Falling back to WebSearch." >&2
+        fi
+      fi
+      if docker compose -f "\$COMPOSE" up -d >/dev/null 2>&1; then
+        ready=0
+        for i in \$(seq 1 30); do if curl -fsS http://localhost:8911/healthz >/dev/null 2>&1; then ready=1; break; fi; sleep 1; done
+        if [ "\$ready" -ne 1 ]; then echo "scout meta: SearXNG health-wait timed out — falling back to WebSearch." >&2; fi
+      else
+        echo "scout meta: 'docker compose up' failed — falling back to WebSearch." >&2
+      fi
+    fi
+    shift
     ;;
 esac
 exec claude --plugin-dir "\$SCOUT_DIR" --agent scout:scout "\$@"
