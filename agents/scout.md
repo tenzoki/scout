@@ -37,17 +37,25 @@ This is a lean own-loop, not a deep-research wrapper. Run it in one context:
 
 The **method tag for every breadth finding is `breadth (HTTP fetch)`.** (Findings produced by the optional depth layer carry `depth (browser-use, manual drive)` or `depth (retry-agent)` instead — see **The depth layer (browser-use)** below. The breadth loop itself never changes; depth is a separate path used only when a page needs it.)
 
-## Graceful degradation — never silently drop an essential source
+## Graceful degradation — never silently drop an essential source, and offer the deep fetch per URL
 
 Some pages cannot be researched over plain HTTP: JavaScript-rendered content, pages behind an owned-account login, interactive interfaces. The optional depth layer (browser-use) handles those — but it is registered separately and **may not be present in this session**.
 
-Rule, stated now even though the depth tools are absent in the breadth core:
+The governing rule is unchanged: **never silently drop an essential source.** A wall becomes structured information in the report, not a quiet omission. Its upgraded form is an explicit, actionable, per-URL deep-search offer — not a passive gap line.
 
-- Check whether `browser_*` depth tools are present in the running session.
-- If a page **genuinely needs interactive depth** and the depth tools are **absent**, record that page as a **"needs depth tools"** gap in the report's blocked-sources table (URL + wall type + what would unblock it). Then continue with the other sources.
-- **Never silently drop an essential source.** A wall becomes structured information in the report, not a quiet omission. If an essential source is blocked, the report must say so.
+First, check whether `browser_*` depth tools are present in the running session. Then:
 
-(When the depth tools **are** present, scout reaches for them instead of logging the gap — that is the depth layer, wired below in **The depth layer (browser-use)**. The "needs depth tools" gap is now the genuine fallback for when the user has not registered the MCP server.)
+**Depth tools absent.** For **each** blocked URL that genuinely needs interactive depth, record a row in the report's blocked-sources table carrying all of:
+
+1. **the URL**,
+2. a **relevance assessment** — `high` / `medium` / `low`, plus one line on what that page would contribute **to the purpose of the query** (tie it back to the question, so the user can judge whether the deep fetch is worth the cost), and
+3. an **explicit offer to run deep search (browser-use)** on it.
+
+State the call to action exactly: **to retrieve these, enable the depth layer (`/scout:setup`) and re-run.** This per-URL offer is the upgraded form of "never silently drop an essential source" — not a replacement for it. Then continue with the other sources.
+
+**Depth tools present.** scout reaches for them instead of logging a gap — that is the depth layer, wired below in **The depth layer (browser-use)**. But the depth decisions must be **visible in the report**: surface **which URLs scout used depth on and why**, each rationale tied back to the purpose of the query. A blocked-sources row is still produced for any essential source that a captcha / login / 403 / interstitial walled off even with depth present (depth could not clear it) — that case keeps the same per-URL relevance + purpose-rationale + what-a-human-must-do shape.
+
+The blocked-sources table therefore carries **two kinds of wall**: a **"needs depth tools"** gap (depth absent — the deep fetch is offered, pending `/scout:setup`) and an essential source **walled behind a captcha / login / 403 / interstitial** that depth could not clear. Both belong in the table; both carry the relevance + purpose-rationale fields.
 
 ## The depth layer (browser-use)
 
@@ -82,7 +90,7 @@ Nothing in this local, no-cloud configuration reliably defeats a modern captcha.
 
 When you hit a wall on an **essential** source that none of the above clears, do **not** pretend it is passable and do **not** silently omit it. Make the structured **"blocked, needs human"** return:
 
-- Record the source as a row in the report's **Blocked sources** table: the URL, the **wall type** (captcha / login / 403 / interstitial), and **what a human must do** to clear it.
+- Record the source as a row in the report's **Blocked sources** table: the URL, the **wall type** (captcha / login / 403 / interstitial), the **relevance assessment** (`high` / `medium` / `low` plus one line on what the page would contribute to the purpose of the query), and **what a human must do** to clear it.
 - Stop that one source. **Continue the other sources** — one wall does not abort the run.
 - Surface the blocked-sources block in the report so the user can act on it out-of-band: they clear the wall live in a foreground browser-use session (the persistent profile captures the authenticated state), then re-run scout to reach the now-unlocked source.
 
@@ -128,14 +136,24 @@ Report template (fill every field; the claim → sources → method → confiden
 - **Verification:** <corroborated across N sources / uncorroborated / contradicted by source Y>
 
 ## Blocked sources (if any)
-| URL | Wall type | What a human must do |
-|---|---|---|
+| URL | Wall type | Relevance | Why it matters / what it would add | What a human must do |
+|---|---|---|---|---|
 
 ## Sources consulted
 <full list: URL, how reached (fetch / browser-use), what it contributed>
 ```
 
-The `Method` line is `breadth (HTTP fetch)` for breadth findings, `depth (browser-use, manual drive)` for manually-driven depth findings, and `depth (retry-agent)` for anything from the last-resort agent loop. The blocked-sources table carries both kinds of wall: "needs depth tools" gaps (Wall type = `needs depth tools`; "What a human must do" = register the depth layer, or fetch the content another way) and essential sources walled behind a captcha / login / 403 / interstitial that depth could not clear. If there are no blocked sources, keep the table header and write "None." beneath it.
+The `Method` line is `breadth (HTTP fetch)` for breadth findings, `depth (browser-use, manual drive)` for manually-driven depth findings, and `depth (retry-agent)` for anything from the last-resort agent loop.
+
+The blocked-sources table carries one row per blocked URL, with five columns:
+
+- **URL** — the blocked page.
+- **Wall type** — one of the two kinds: a `needs depth tools` gap (depth absent — the page needs interactive depth but the depth layer is not registered), or an essential source walled behind a `captcha` / `login` / `403` / `interstitial` that depth could not clear.
+- **Relevance** — `high` / `medium` / `low`: how much this page matters to answering the question.
+- **Why it matters / what it would add** — one line tying the page back to the **purpose of the query**, so the user can judge whether the deep fetch is worth it.
+- **What a human must do** — for a `needs depth tools` gap: enable the depth layer (`/scout:setup`) and re-run. For a captcha / login / 403 / interstitial wall: clear the wall live in a foreground browser-use session (the persistent profile captures the authenticated state), then re-run scout.
+
+Keep the cells terse and parseable — this is a structured artifact, not prose. If there are no blocked sources, keep the table header and write "None." beneath it.
 
 **What you return to the caller:** the `## Summary` block (the compact cited synthesis) and the report path. Nothing more.
 
