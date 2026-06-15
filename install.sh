@@ -114,7 +114,7 @@ case "\${1:-}" in
       fi
       if docker compose -f "\$COMPOSE" up -d >/dev/null 2>&1; then
         ready=0
-        for i in \$(seq 1 30); do if curl -fsS http://localhost:8911/healthz >/dev/null 2>&1; then ready=1; break; fi; sleep 1; done
+        for i in \$(seq 1 30); do if curl -fsS http://localhost:8911/ >/dev/null 2>&1; then ready=1; break; fi; sleep 1; done
         if [ "\$ready" -ne 1 ]; then echo "scout meta: SearXNG health-wait timed out — falling back to WebSearch." >&2; fi
       else
         echo "scout meta: 'docker compose up' failed — falling back to WebSearch." >&2
