@@ -27,6 +27,15 @@
 # for an instant). The inherit path avoids that entirely and is the default when
 # ANTHROPIC_API_KEY is already in the environment.
 #
+# Inherit timing: the inherit path reads ANTHROPIC_API_KEY at MCP server-launch
+# time from the environment of whatever shell launches Claude Code — NOT at
+# registration time, and NOT from a file. So the key must be exported before
+# Claude Code starts, in the launching shell. Registering inherit-mode in a shell
+# that has the key, then launching Claude Code from a different shell that does
+# not, leaves registration green but the first browser_extract_content failing
+# with an opaque auth error. This script warns loudly (below) when inherit is
+# selected with no key in the registering environment.
+#
 # This script never writes the key to a file and never echoes the full key.
 
 set -u
@@ -72,6 +81,24 @@ if [ "$INHERIT" -ne 1 ] && [ -z "$KEY" ]; then
   exit 1
 fi
 
+# Early warning: inherit mode chosen but no key in THIS environment. Registration
+# will still succeed (and look green), but depth will not work until the key is
+# exported into the shell that launches Claude Code. Warn loudly; do not fail —
+# the inherit-at-runtime design is legitimate and the key may be exported later.
+if [ "$INHERIT" -eq 1 ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+  {
+    echo
+    echo "WARNING: inherit mode selected, but ANTHROPIC_API_KEY is NOT set in this environment."
+    echo "WARNING: Registration will still succeed and 'claude mcp get browser-use' will look healthy,"
+    echo "WARNING: but depth will NOT work until you export the key and (re)start Claude Code."
+    echo "WARNING: The browser-use MCP server reads ANTHROPIC_API_KEY at launch time from the shell"
+    echo "WARNING: that starts Claude Code — not from this registration, and not from any file."
+    echo "WARNING: Fix: export ANTHROPIC_API_KEY=sk-ant-... in the shell that launches Claude Code,"
+    echo "WARNING: then restart Claude Code. Or re-run with BROWSERUSE_ANTHROPIC_KEY=sk-ant-... to pin it."
+    echo
+  } >&2
+fi
+
 # Optional non-default extraction model.
 MODEL="${SCOUT_DEPTH_EXTRACT_MODEL:-}"
 
@@ -92,6 +119,17 @@ if [ "$INHERIT" -eq 1 ]; then
   else
     claude mcp add-json browser-use -s user '{ "type": "stdio", "command": "uvx", "args": ["--from", "'"$PIN"'", "python", "'"$SHIM_PATH"'", "--mcp"], "env": { "SCOUT_DEPTH_PROVIDER": "anthropic", "ANONYMIZED_TELEMETRY": "False", "BROWSER_USE_VERSION_CHECK": "false" } }'
   fi
+  # Inherit-mode runtime contract: the key is read from the launching shell's
+  # environment when the MCP server starts, not from this config. Say so plainly
+  # so a green registration is not mistaken for a working depth layer.
+  echo
+  echo "Inherit mode: no ANTHROPIC_API_KEY was written to the config."
+  echo "The browser-use MCP server reads ANTHROPIC_API_KEY at launch time from the"
+  echo "environment of whatever shell starts Claude Code. Export it BEFORE you start"
+  echo "Claude Code (in that launching shell), or depth fails on the first extract."
+  echo "Put 'export ANTHROPIC_API_KEY=sk-ant-...' in a file you source on shell start,"
+  echo "kept outside any repo. To sidestep env timing entirely, re-run with"
+  echo "BROWSERUSE_ANTHROPIC_KEY=sk-ant-... to pin the key into the user-scope config."
 else
   # Flag form keeps the key out of a JSON blob and matches the skill's documented
   # mechanism. The shim runs inside the pinned browser-use env via `--from`.

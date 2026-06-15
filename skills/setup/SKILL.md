@@ -68,6 +68,15 @@ Make the decision with the user via `AskUserQuestion`, then carry it into Step 4
 - **If present:** ask whether scout should **inherit** the key already in their environment (recommended — the key then never lands in the MCP config file, and never appears in any process argument) or **pin** it into the config. Inherit is the default. If they choose inherit, you will invoke the script with `BROWSERUSE_INHERIT=1`. If they choose pin, collect the key as below.
 - **If not set:** ask the user to supply their Anthropic key via `AskUserQuestion`. Read it from them directly. You will pass it to the script via the `BROWSERUSE_ANTHROPIC_KEY` env var in Step 4 — it goes only into Claude Code's user-scope MCP config.
 
+> **Inherit mode reads the key at launch, not at registration — flag this whenever inherit is on the table.** With inherit, no key is written to the config; the browser-use MCP server reads `ANTHROPIC_API_KEY` from the environment of the Claude Code process *when that process starts*. So the key must be exported **before** Claude Code launches, in the shell that launches it.
+>
+> Two consequences to tell the user plainly:
+>
+> - **If the key was NOT in this session's environment when Claude Code started** (the `ANTHROPIC_API_KEY: not set` check above), then inherit cannot see it — even if you register now. Exporting it inside this running session is too late: the server inherits the environment that was live at Claude Code's launch. They must export the key and **restart Claude Code** for inherit to pick it up. If they don't want to restart, pin the key instead (`BROWSERUSE_ANTHROPIC_KEY=...`).
+> - **Make it durable.** Recommend putting `export ANTHROPIC_API_KEY=sk-ant-...` in a file they source on shell start (e.g. a private `~/.scout-env` sourced from their shell profile), kept **outside any repo** so the key never lands in version control. That way every future shell — and every Claude Code launch from it — already has the key.
+>
+> The register script also warns loudly on this exact case (inherit selected with no key in the registering environment), so the warning is reinforced at registration time. Pinning the key sidesteps the whole launch-timing question.
+
 Whichever path: **never** echo the full key back into chat, never write it into any file in the repo, and never put it in a commit.
 
 ## Step 4 — Register the server (invoke the script)
@@ -81,6 +90,8 @@ Pass the key decision from Step 3 via env so nothing key-shaped is typed into a 
 ```bash
 BROWSERUSE_INHERIT=1 bash "${CLAUDE_PLUGIN_ROOT}/skills/setup/register-browser-use.sh"
 ```
+
+When you run the inherit path, read the script's output to the user — it prints a notice that the key is read at launch time from the shell that starts Claude Code, and a loud WARNING if `ANTHROPIC_API_KEY` was absent from the registering environment. Do not bury that warning; repeat its gist in scout's voice (export the key before launching Claude Code, restart if it wasn't set when this session started).
 
 **Pinned-key path** (user supplied a key to write into the config):
 
@@ -121,7 +132,7 @@ The script ends by running `claude mcp get browser-use` and printing the result.
 
 If the entry is missing or wrong, the registration did not take — report the actual script output and stop so the user can retry, rather than reporting a false success.
 
-On success, tell the user: depth is registered. Re-run scout — pages that need an interactive browser will now be driven in a real local Chromium, and depth findings will carry the `depth (browser-use, manual drive)` method tag in the report.
+On success, tell the user: depth is registered. Re-run scout — pages that need an interactive browser will now be driven in a real local Chromium, and depth findings will carry the `depth (browser-use, manual drive)` method tag in the report. If they registered via inherit, remind them once more that the depth layer only works when `ANTHROPIC_API_KEY` is live in the shell that launches scout/Claude Code — a green registration alone does not prove the key is reachable at runtime.
 
 ## Step 6 — Set expectations honestly (no captcha; foreground handoff)
 
