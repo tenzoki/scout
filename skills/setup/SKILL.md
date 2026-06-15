@@ -1,11 +1,20 @@
 ---
-description: Set up scout's optional depth layer by registering the browser-use MCP server, so a non-technical user does not hand-edit Claude Code's MCP config. Invoke when the user wants to "set up scout depth", "enable interactive browsing", "register browser-use", "turn on the depth layer", or "let scout drive a real browser". Registers a local Chromium browser-use stack pinned to the tested version with both no-cloud env vars baked in, and an OpenAI key the user supplies. Idempotent and non-destructive — depth is entirely OPTIONAL; scout works breadth-only without it.
+description: Set up scout's optional add-ons by registering their MCP servers, so a non-technical user does not hand-edit Claude Code's MCP config. Covers two optional layers — the browser-use depth layer (interactive browsing) and the SearXNG meta discovery backend (self-hosted metasearch). Invoke when the user wants to "set up scout depth", "enable interactive browsing", "register browser-use", "turn on the depth layer", "let scout drive a real browser", "set up scout meta", "enable SearXNG", or "register the metasearch backend". browser-use registers a local Chromium stack pinned to the tested version with both no-cloud env vars and an OpenAI key the user supplies; SearXNG registers the self-hosted metasearch MCP (no key). Idempotent and non-destructive — both layers are entirely OPTIONAL; scout works breadth-only with WebSearch without either.
 allowed-tools: [Bash, Read, AskUserQuestion]
 ---
 
-# /scout:setup — register scout's optional depth layer (browser-use)
+# /scout:setup — register scout's optional add-ons (browser-use depth layer, SearXNG meta backend)
 
-This skill registers the **browser-use** MCP server so scout can drive a real local Chromium browser for pages the breadth layer cannot reach over plain HTTP (JavaScript-rendered content, owned-account logins, interactive interfaces).
+This skill registers scout's optional MCP-backed add-ons. There are two, and they are independent — register either, both, or neither:
+
+- **browser-use depth layer** — a real local Chromium browser for pages the breadth layer cannot reach over plain HTTP (JavaScript-rendered content, owned-account logins, interactive interfaces). Covered in the steps immediately below.
+- **SearXNG meta discovery backend** — a self-hosted metasearch engine scout uses to *discover* URLs instead of the built-in `WebSearch`. Covered in **Optional: register the SearXNG meta backend** near the end.
+
+Ask the user which they want (or offer both). The two paths share nothing except this skill's voice and the remove-then-add discipline. The browser-use path below is unchanged; the SearXNG path is opt-in, discovery-only, and needs no key.
+
+## browser-use depth layer
+
+This registers the **browser-use** MCP server so scout can drive a real local Chromium browser for pages the breadth layer cannot reach over plain HTTP (JavaScript-rendered content, owned-account logins, interactive interfaces).
 
 **Depth is optional.** scout runs fine breadth-only. Without depth registered, scout records any page that genuinely needs an interactive browser as a "needs depth tools" gap in its report's blocked-sources table — it never silently drops a source. Run this skill only if you actually hit such pages.
 
@@ -118,9 +127,37 @@ Be clear-eyed, so the user is not surprised later:
 
 Point the user at the README's **Optional depth layer (browser-use)** section for the full handoff write-up. Do not re-narrate the whole thing here.
 
+## Optional: register the SearXNG meta backend
+
+This path is fully independent of browser-use. Run it when the user wants scout to discover URLs through a **self-hosted SearXNG metasearch engine** instead of the built-in `WebSearch`. Apply the same scout voice as above.
+
+**State what it is, plainly.** SearXNG is scout's **opt-in discovery backend** — it finds URLs. It is **not** a fetcher: `WebFetch` and the depth layer still do all content fetching. scout works fine without it (default discovery is `WebSearch`), so this is purely additive. It is **self-hosted** and needs **no API key** — the skill collects nothing secret for SearXNG. There are two coupled pieces: this skill **registers the MCP**, and `scout meta` **starts the local SearXNG container**. Both are needed for scout to actually use it; if the MCP is registered but the container is not running (no `scout meta`), scout's reachability probe fails and it falls back to `WebSearch` cleanly.
+
+**Check prerequisites (stop cleanly if missing).** SearXNG registration needs `npx` (from Node) for the MCP runner, and Docker to actually run the container via `scout meta`:
+
+```bash
+command -v claude >/dev/null 2>&1 && echo "claude: ok" || echo "claude: MISSING"
+command -v npx    >/dev/null 2>&1 && echo "npx: ok"    || echo "npx: MISSING"
+command -v docker >/dev/null 2>&1 && echo "docker: ok" || echo "docker: MISSING (needed for 'scout meta' to start the container)"
+```
+
+- If `claude` or `npx` is missing: stop. `npx` ships with Node.js — point the user at https://nodejs.org. Do not continue registration.
+- If `docker` is missing: the MCP can still be registered, but tell the user plainly that `scout meta` cannot start the container until Docker is installed (https://docs.docker.com/get-docker), so scout will fall back to WebSearch until then. Let the user decide whether to register now or install Docker first.
+
+**Register the server (invoke the script).** The registration mechanics — the `mcp-searxng` pin, the `SEARXNG_URL`, the remove-then-add, the verify — live in one place: `${CLAUDE_PLUGIN_ROOT}/skills/setup/register-searxng.sh`. Drive it the same way you drive the browser-use script. It writes no secret:
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/skills/setup/register-searxng.sh"
+```
+
+The script removes any existing user-scope `searxng`, adds it fresh under the **exact** name `searxng` (coupled to scout's allow-list prefix `mcp__searxng__web_search` — a different name means scout silently falls back to WebSearch), at user scope, with `SEARXNG_URL=http://localhost:8911`, then verifies with `claude mcp get searxng`.
+
+**Confirm and set expectations.** Read the script's verify output: it should show `Type: stdio`, `Command: npx`, the pinned `mcp-searxng` arg, and `SEARXNG_URL`. On success, tell the user: the meta backend is registered. Start scout with `scout meta` (not plain `scout`) so the SearXNG container comes up; scout then discovers URLs through SearXNG and each discovered source carries a `discovery: searxng` note in the report. If they run plain `scout`, or if the container is not up, scout discovers with WebSearch — no failure either way. Point them at the README's **Optional metasearch backend (SearXNG)** section for the full picture.
+
 ## What this skill does NOT do
 
-- Does not install `uv`/`uvx`, Claude Code, or a browser — it only checks and points at the install page if missing.
-- Does not write your OpenAI key into any repo file, print it, or commit it.
+- Does not install `uv`/`uvx`, `npx`/Node, Docker, Claude Code, or a browser — it only checks and points at the install page if missing.
+- Does not write your OpenAI key into any repo file, print it, or commit it. The SearXNG path writes no secret at all.
+- Does not start the SearXNG container — that is `scout meta`'s job. This skill only registers the MCP.
 - Does not change scout's agent, plugin manifest, or style profiles.
 - Does not register anything if a prerequisite is missing — it stops cleanly.
