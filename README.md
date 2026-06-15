@@ -117,6 +117,17 @@ BROWSERUSE_ANTHROPIC_KEY=sk-ant-... bash ~/.scout/skills/setup/register-browser-
 
 Run with neither variable on an interactive terminal and it offers inherit (when `ANTHROPIC_API_KEY` is set) or prompts for a key with hidden input. It never writes the key to a file or echoes it. (Adjust the path if you set `SCOUT_HOME`.)
 
+> **Inherit mode: export the key *before* you start Claude Code.** With `BROWSERUSE_INHERIT=1`, no key is written to the config — the browser-use MCP server reads `ANTHROPIC_API_KEY` from the environment of the Claude Code process *at the moment that process launches*. If the key was not exported before Claude Code started, registration still shows green, but your first `browser_extract_content` call fails with an opaque auth error. So export the key first, then launch Claude Code:
+>
+> ```bash
+> export ANTHROPIC_API_KEY=sk-ant-...
+> export ANONYMIZED_TELEMETRY=False
+> export BROWSER_USE_VERSION_CHECK=false
+> scout          # or however you launch Claude Code with the scout agent
+> ```
+>
+> Put that `export ANTHROPIC_API_KEY=...` line in a file you source on shell start (e.g. a private `~/.scout-env` you `source` from your shell profile), kept **outside any repo** so the key never lands in version control. Registering inherit-mode in one shell and then launching Claude Code from a different shell that never sourced the key is the exact trap this avoids: the key has to be live in the launching shell, not just the shell you registered from. If you would rather not manage shell environment at all, pin the key with `BROWSERUSE_ANTHROPIC_KEY=sk-ant-...` instead — it goes only into Claude Code's user-scope MCP config.
+
 The manual JSON block below is the ultimate fallback if you would rather edit your MCP settings yourself.
 
 Add this to your Claude Code MCP settings. It runs browser-use locally via `uvx`, pinned to the version scout is tested against, through scout's Anthropic shim:
