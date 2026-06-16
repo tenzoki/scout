@@ -53,6 +53,36 @@ scout          # starts Claude Code with the scout agent loaded
 - **Uninstall:** `scout --uninstall`.
 - **Where it lives:** `scout --where` (prints the install dir).
 
+## Quick start (Windows)
+
+Windows gets the same no-git path. Paste this one line into **cmd.exe** or
+**PowerShell**:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/tenzoki/scout/main/install.ps1 | iex"
+```
+
+Prefer not to type? Download the repo's `install.cmd` and **double-click it** —
+it confirms the one prerequisite, then runs the exact same one-liner.
+
+This downloads scout over plain HTTPS into `%USERPROFILE%\.scout` and installs a
+`scout` launcher on your **User PATH**. No git, no SSH, no Claude Code
+marketplace — the only thing you need already installed is the Claude Code CLI.
+The `irm | iex` form runs in memory, so it is not blocked by the default
+PowerShell ExecutionPolicy that gates `.ps1` files on disk. Then, in any project
+folder:
+
+```powershell
+scout          # starts Claude Code with the scout agent loaded
+```
+
+- **Update:** `scout --update` (or re-run the one-liner above).
+- **Uninstall:** `scout --uninstall`.
+- **Where it lives:** `scout --where` (prints the install dir).
+
+The launcher is added to your User PATH automatically; open a **new** terminal
+after installing so the `scout` command is visible everywhere.
+
 ### Where scout installs
 
 The one-line installer writes to exactly two places — both in your home folder, nothing system-wide and nothing inside Claude Code's plugin cache:
@@ -65,10 +95,23 @@ The one-line installer writes to exactly two places — both in your home folder
 
 The launcher is one line — `claude --plugin-dir ~/.scout --agent scout:scout "$@"` — so every run loads the plugin straight from `~/.scout`. That is why update and uninstall are reliable: there is no cache to get out of sync. `scout --where` prints the plugin path any time.
 
-Both locations are overridable with environment variables before installing:
+On **Windows**, the layout mirrors the home-folder convention:
 
-- `SCOUT_HOME` — where the plugin files go (default `~/.scout`)
-- `SCOUT_BIN` — where the `scout` launcher goes (default `~/.local/bin`)
+```
+%USERPROFILE%\.local\bin\scout.cmd   the `scout` command (a thin launcher)
+%USERPROFILE%\.scout\                the plugin files: .claude-plugin\, agents\,
+                                     skills\, services\, stilwerk\, README, LICENSE
+```
+
+`%USERPROFILE%\.local\bin` is added to your **User PATH** automatically (no admin
+needed). `scout --where` prints the plugin path; `scout --uninstall` removes the
+install dir and the launcher.
+
+Both locations are overridable with environment variables before installing
+(set them before the one-liner on Windows too):
+
+- `SCOUT_HOME` — where the plugin files go (default `~/.scout`, or `%USERPROFILE%\.scout` on Windows)
+- `SCOUT_BIN` — where the `scout` launcher goes (default `~/.local/bin`, or `%USERPROFILE%\.local\bin` on Windows)
 
 To remove scout completely: `scout --uninstall` (which is just `rm -rf ~/.scout` plus removing the launcher). Claude Code's own `~/.claude/` directory is never touched.
 
@@ -210,6 +253,8 @@ SearXNG needs both an MCP registration and a running container:
 
    `scout meta` brings up the container (`docker compose up -d` against the bundled `services/searxng/docker-compose.yml`), waits for it to report healthy, then launches scout. If Docker is missing, the container fails to start, or the health-wait times out, it prints a plain message naming the cause and launches scout with `WebSearch` instead — it never hard-fails.
 
+   **`scout meta` works on Windows too**, with the same behaviour: it needs **Docker Desktop** (checked when you run `scout meta`, not at install time), generates the `secret_key` with Windows-native crypto instead of openssl, and falls back to `WebSearch` on any failure — Docker absent, container start fails, or health-wait times out.
+
 Plain `scout` (without `meta`) never touches SearXNG. When SearXNG is registered **and** the container is up, scout discovers through it and each source in the report carries a `discovery: searxng` note; otherwise sources carry `discovery: websearch`.
 
 ### `json` output is required
@@ -218,7 +263,7 @@ The bundled SearXNG settings enable `json` output (`search.formats: [html, json]
 
 ### The secret is generated per deployment — never shipped
 
-SearXNG needs a `server.secret_key`. scout **does not ship one** — the committed `settings.yml` carries an empty `secret_key`. On the first `scout meta` start, the launcher generates a real key (`openssl rand -hex 32`) into your **installed** copy at `~/.scout/services/searxng/config/settings.yml`. The repo never contains a real secret, and every deployment gets its own. (If `openssl` is missing, the launcher says so and falls back to WebSearch rather than starting with a blank key.)
+SearXNG needs a `server.secret_key`. scout **does not ship one** — the committed `settings.yml` carries an empty `secret_key`. On the first `scout meta` start, the launcher generates a real key into your **installed** copy at `~/.scout/services/searxng/config/settings.yml` (`%USERPROFILE%\.scout\services\searxng\config\settings.yml` on Windows). On mac/Linux it uses `openssl rand -hex 32`; on Windows it uses Windows-native crypto (`System.Security.Cryptography`), since openssl is not present by default. The repo never contains a real secret, and every deployment gets its own.
 
 The bundled settings also set `limiter: false`, which is fine for single-user localhost. If you expose this SearXNG on a shared or public host, re-enable the limiter.
 
