@@ -144,6 +144,27 @@ The depth layer lets scout drive a **real local Chromium browser** for pages the
 
 It is **entirely optional**. If you never register it, scout runs breadth-only and records any page that genuinely needs an interactive browser as a "needs depth tools" gap in the report's blocked-sources table — never silently dropped. Register it only if you actually hit such pages.
 
+### Wire the depth layer at install time (keeps your session on subscription auth)
+
+The fastest way to wire the depth layer is to set `BROWSERUSE_ANTHROPIC_KEY` **before** the install/update one-liner. The installer then pins that key into the browser-use MCP server for you — no separate `/scout:setup` step:
+
+```bash
+# mac / Linux
+BROWSERUSE_ANTHROPIC_KEY=sk-ant-... curl -fsSL https://raw.githubusercontent.com/tenzoki/scout/main/install.sh | bash
+```
+
+```powershell
+# Windows (cmd.exe or PowerShell)
+$env:BROWSERUSE_ANTHROPIC_KEY="sk-ant-..."; irm https://raw.githubusercontent.com/tenzoki/scout/main/install.ps1 | iex
+```
+
+This pins the key into the **browser-use MCP server only** — so you do **not** export `ANTHROPIC_API_KEY` in your shell. Your scout session stays on claude.ai-subscription/OAuth auth and **Remote Control keeps working** (an exported `ANTHROPIC_API_KEY` would flip the whole session to API-key auth and disable both — see the inherit-vs-pin note under [You need your own Anthropic API key](#you-need-your-own-anthropic-api-key) and the registration notes below).
+
+- **Optional.** scout's breadth core needs no key; leave the var unset and install/update behave exactly as before, touching no existing browser-use registration.
+- **Best-effort.** If a prerequisite is missing (`uvx`, the `claude` CLI), the installer warns and still finishes — the breadth core is installed regardless.
+- **Rotate the key** by re-running update with the var set: `BROWSERUSE_ANTHROPIC_KEY=sk-ant-new scout --update` (`$env:BROWSERUSE_ANTHROPIC_KEY="sk-ant-new"; scout --update` on Windows). A plain update with the var unset leaves the existing registration alone.
+- **Caveat.** The pinned key is stored in plaintext in your user-scope MCP config (`~/.claude.json`, or `%USERPROFILE%\.claude.json` on Windows).
+
 ### Register the MCP server
 
 **Easiest path:** run the `/scout:setup` skill. It registers the server for you with the `0.11.9` pin and both no-cloud env vars baked in, checks `uvx`, and prompts for your Anthropic key (it never writes the key into the repo).

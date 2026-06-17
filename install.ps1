@@ -209,6 +209,45 @@ exit 0
 "@
   [System.IO.File]::WriteAllText($MetaHelper, $metaBody, (New-Object System.Text.UTF8Encoding $false))
 
+  # --- 4b. Optional depth-layer key wiring -----------------------------------
+  # When $env:BROWSERUSE_ANTHROPIC_KEY is set, pin it into the browser-use MCP
+  # server's env block so the depth layer works WITHOUT the user exporting
+  # ANTHROPIC_API_KEY in their shell (which would flip the scout session to
+  # API-key auth and break claude.ai-subscription auth + Remote Control). The
+  # bash register-browser-use.sh does not run on Windows, so we register inline
+  # with the `claude` CLI here — mirroring register-browser-use.sh's pinned-mode
+  # path exactly (remove-then-add at user scope; the four -e env vars; the
+  # --from/python/shim/--mcp args). The key goes via the `claude` CLI into the
+  # user-scope MCP config (%USERPROFILE%\.claude.json), never into a repo file;
+  # it is briefly visible in the process args (same caveat as the bash pinned
+  # path). With the var unset we do NOT touch any existing registration.
+  #
+  # Best-effort: wrapped in try/catch so a failure (uvx/claude missing, etc.)
+  # warns and continues — it never fails the install.
+  if ($env:BROWSERUSE_ANTHROPIC_KEY) {
+    Say "Wiring the optional depth layer with a pinned Anthropic key..."
+    $Shim = Join-Path $InstallDir "services\browser-use-anthropic\scout_browseruse_anthropic.py"
+    try {
+      # Idempotency: drop any prior user-scope entry first (add refuses to
+      # overwrite). Suppress its output/error — a first run has nothing to remove.
+      claude mcp remove browser-use -s user 2>$null | Out-Null
+      claude mcp add browser-use uvx -s user `
+        -e ANTHROPIC_API_KEY=$env:BROWSERUSE_ANTHROPIC_KEY `
+        -e SCOUT_DEPTH_PROVIDER=anthropic `
+        -e ANONYMIZED_TELEMETRY=False `
+        -e BROWSER_USE_VERSION_CHECK=false `
+        -- --from "browser-use[cli]@0.11.9" python "$Shim" --mcp
+      if ($LASTEXITCODE -ne 0) { throw "claude mcp add exited $LASTEXITCODE" }
+      Say "Depth layer registered: browser-use MCP pinned to your Anthropic key (your session stays on subscription auth)."
+    } catch {
+      Warn "Depth-layer registration did not complete (e.g. uvx/claude missing) — scout's breadth core is installed and works regardless."
+      Warn "Re-run with `$env:BROWSERUSE_ANTHROPIC_KEY set, or use /scout:setup, once the prerequisite is in place."
+    }
+  } else {
+    Write-Host "Tip: wire the optional depth layer by setting `$env:BROWSERUSE_ANTHROPIC_KEY before install/update,"
+    Write-Host "     e.g.  `$env:BROWSERUSE_ANTHROPIC_KEY='sk-ant-...'; scout --update  (keeps your session on subscription auth)."
+  }
+
   # --- 5. PATH check + add (user scope, no admin) ----------------------------
   $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
   $onPath = $false

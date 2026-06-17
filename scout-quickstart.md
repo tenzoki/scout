@@ -68,6 +68,22 @@ scout
 
 Then ask scout a research question. State it fully up front — scout runs autonomously and can't ask clarifying questions mid-run. It writes one cited report into a `scout-workbench/` folder it creates in the current directory, and returns a compact cited summary plus the path.
 
+### Wire the depth layer at install time (keeps your session on subscription auth)
+
+The shortest path to the depth layer is to set `BROWSERUSE_ANTHROPIC_KEY` **before** the install/update one-liner — the installer pins the key into the browser-use MCP server for you, so you skip the `/scout:setup` browser-use step:
+
+```bash
+# mac / Linux
+BROWSERUSE_ANTHROPIC_KEY=sk-ant-... curl -fsSL https://raw.githubusercontent.com/tenzoki/scout/main/install.sh | bash
+```
+
+```powershell
+# Windows
+$env:BROWSERUSE_ANTHROPIC_KEY="sk-ant-..."; irm https://raw.githubusercontent.com/tenzoki/scout/main/install.ps1 | iex
+```
+
+The key is pinned into the **browser-use MCP server only**, so you do **not** export `ANTHROPIC_API_KEY` in your shell — your scout session stays on claude.ai-subscription/OAuth auth and **Remote Control keeps working**. It's optional (the breadth core needs no key), best-effort (a missing `uvx`/`claude` just warns, the install still succeeds), and leaves any existing registration alone when the var is unset. Rotate by re-running update with the var set (`BROWSERUSE_ANTHROPIC_KEY=sk-ant-new scout --update`). Caveat: the pinned key is stored in plaintext in your user-scope MCP config (`~/.claude.json` / `%USERPROFILE%\.claude.json`). This is the **pin** side of the inherit-vs-pin tradeoff noted below; you can still do it later via `/scout:setup` instead.
+
 ### Full scope (both optional layers)
 
 First time only, register the add-ons; after that, `scout meta` is all you need.

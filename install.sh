@@ -127,6 +127,31 @@ exec claude --plugin-dir "\$SCOUT_DIR" --agent scout:scout "\$@"
 EOF
 chmod +x "$LAUNCHER"
 
+# --- 4b. Optional depth-layer key wiring -------------------------------------
+# When BROWSERUSE_ANTHROPIC_KEY is set, pin it into the browser-use MCP server's
+# env block so the depth layer works WITHOUT the user exporting ANTHROPIC_API_KEY
+# in their shell (which would flip the scout session to API-key auth and break
+# claude.ai-subscription auth + Remote Control). The key goes only into the
+# browser-use MCP child process via the user-scope MCP config — never into a repo
+# file. With the var unset, install/update behaves exactly as before and does NOT
+# touch any existing browser-use registration.
+#
+# Best-effort + set -e guard: register-browser-use.sh can exit non-zero (uvx
+# missing, etc.). We capture the exit code in an `if` condition so its failure
+# can never abort this installer under `set -e`/`set -o pipefail`.
+if [ -n "${BROWSERUSE_ANTHROPIC_KEY:-}" ]; then
+  say "Wiring the optional depth layer with a pinned Anthropic key..."
+  if BROWSERUSE_ANTHROPIC_KEY="$BROWSERUSE_ANTHROPIC_KEY" bash "$INSTALL_DIR/skills/setup/register-browser-use.sh"; then
+    say "Depth layer registered: browser-use MCP pinned to your Anthropic key (your shell stays on subscription auth)."
+  else
+    warn "Depth-layer registration did not complete (e.g. uvx missing) — scout's breadth core is installed and works regardless."
+    warn "Re-run with BROWSERUSE_ANTHROPIC_KEY set, or use /scout:setup, once the prerequisite is in place."
+  fi
+else
+  echo "Tip: wire the optional depth layer by setting BROWSERUSE_ANTHROPIC_KEY before install/update,"
+  echo "     e.g.  BROWSERUSE_ANTHROPIC_KEY=sk-ant-... scout --update  (keeps your session on subscription auth)."
+fi
+
 # --- 5. PATH check ------------------------------------------------------------
 say "scout ${VERSION:-} installed."
 case ":$PATH:" in
