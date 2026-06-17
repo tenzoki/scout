@@ -171,6 +171,8 @@ Run with neither variable on an interactive terminal and it offers inherit (when
 >
 > Put that `export ANTHROPIC_API_KEY=...` line in a file you source on shell start (e.g. a private `~/.scout-env` you `source` from your shell profile), kept **outside any repo** so the key never lands in version control. Registering inherit-mode in one shell and then launching Claude Code from a different shell that never sourced the key is the exact trap this avoids: the key has to be live in the launching shell, not just the shell you registered from. If you would rather not manage shell environment at all, pin the key with `BROWSERUSE_ANTHROPIC_KEY=sk-ant-...` instead — it goes only into Claude Code's user-scope MCP config.
 
+> **Inherit mode changes your whole-session auth.** Exporting `ANTHROPIC_API_KEY` session-wide (the inherit-mode path) switches the entire Claude Code session to **API-key auth** — which disables claude.ai-subscription auth and **Remote Control** (and some orgs disallow Remote Control by policy). If you rely on subscription auth or Remote Control *and* want the depth layer, **pin** the key into the browser-use server instead (`BROWSERUSE_ANTHROPIC_KEY=...` via `/scout:setup` or the script). Then only the browser-use server sees the key, the session environment stays clean, and session auth — including Remote Control — is unaffected. (The SearXNG meta backend needs no Anthropic key, so it never triggers this.)
+
 The manual JSON block below is the ultimate fallback if you would rather edit your MCP settings yourself.
 
 Add this to your Claude Code MCP settings. It runs browser-use locally via `uvx`, pinned to the version scout is tested against, through scout's Anthropic shim:
@@ -270,6 +272,16 @@ The bundled settings also set `limiter: false`, which is fine for single-user lo
 ### Server name and tool prefix must match
 
 The MCP server name `searxng` must equal the `mcp__searxng__` prefix in scout's tool allow-list (`agents/scout.md`). `register-searxng.sh` registers it under exactly `searxng`. If you register it under a different name, scout cannot see the discovery tool and silently falls back to WebSearch — keep the name `searxng`.
+
+### Troubleshooting: `searxng` defined in multiple scopes
+
+If `/mcp` (or `claude mcp list`) shows `searxng` failing to connect with a message that it is **defined in multiple scopes with different endpoints**, a stray registration from an unrelated project is shadowing scout's. `/scout:setup` registers scout's SearXNG at **user scope** (`npx -y mcp-searxng`); if another project registered a different `searxng` endpoint at **project scope**, the two collide. Remove the project-scope one so scout's user-scope server is the one that loads:
+
+```bash
+claude mcp remove searxng -s project
+```
+
+(If the conflicting entry were instead at user scope, you'd remove that with `-s user` — but scout's is the user-scope one, so the project-scope entry is normally the one to drop.)
 
 ## Language
 

@@ -80,6 +80,8 @@ First time only, register the add-ons; after that, `scout meta` is all you need.
 
    This is the #1 thing that bites people: if the key isn't live in the launching shell, registration still shows green but the first depth call fails with an opaque auth error. Put the `export` line in a file you source on shell start (kept outside any repo), or pin the key at registration instead.
 
+   > **Heads-up — inherit mode changes session auth.** Exporting `ANTHROPIC_API_KEY` session-wide switches the whole Claude Code session to **API-key auth**, which disables claude.ai-subscription auth and **Remote Control** (some orgs disallow Remote Control by policy). If you rely on either *and* want the depth layer, **pin** the key into the browser-use server instead (`BROWSERUSE_ANTHROPIC_KEY=...` via `/scout:setup`) — then only that server sees the key and your session auth stays untouched. The SearXNG meta backend needs no key, so it never triggers this.
+
 2. **Launch with the meta flag** from your project folder:
 
    ```bash
@@ -100,3 +102,13 @@ First time only, register the add-ons; after that, `scout meta` is all you need.
 4. **Restart the session.** MCP servers take effect on restart, so quit and relaunch (`scout meta`) after `/scout:setup`. On the next run scout drives a real browser for pages that need it and discovers URLs through SearXNG.
 
 Plain `scout` (without `meta`) never touches SearXNG, and without the depth layer registered scout simply records any browser-needing page as a gap in the report rather than dropping it — so every layer degrades cleanly to the one below.
+
+### Troubleshooting: `searxng` in multiple scopes
+
+If `/mcp` shows `searxng` failing to connect because it is **defined in multiple scopes with different endpoints**, a stray registration from another project is shadowing scout's. `/scout:setup` registers scout's SearXNG at **user scope** (`npx -y mcp-searxng`); remove the conflicting **project-scope** entry so scout's loads:
+
+```bash
+claude mcp remove searxng -s project
+```
+
+(If the stray entry were at user scope instead, use `-s user` — but scout's is the user-scope one, so the project-scope entry is normally the one to drop.)
