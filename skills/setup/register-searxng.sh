@@ -44,5 +44,48 @@ claude mcp add searxng npx -s user -e SEARXNG_URL="$SEARXNG_URL" -- -y "$PIN"
 echo
 echo "== verify =="
 claude mcp get searxng 2>&1
+
+echo
+echo "== scope-conflict check =="
+# scout registers searxng at USER scope (npx mcp-searxng + SEARXNG_URL). A stray
+# searxng registration at project or local scope from an UNRELATED project wins
+# over scout's user-scope one (project > local > user), so the MCP fails to
+# connect ("defined in multiple scopes with different endpoints" / "Connection
+# closed"). Detect that and warn — never auto-remove, the other entry may belong
+# to a project the user still wants.
+conflict=0
+
+# Signal 1: `claude mcp list` surfaces the multi-scope conflict on a searxng line.
+list_out="$(claude mcp list 2>&1 || true)"
+if printf '%s\n' "$list_out" | grep -i 'searxng' | grep -qi 'multiple scopes\|different endpoint'; then
+  conflict=1
+fi
+
+# Signal 2: the RESOLVED searxng server is not scout's. scout's resolved command
+# is `npx ... mcp-searxng` carrying SEARXNG_URL. If the active resolution is
+# something else (e.g. a `python3 .../server.py`), a higher-priority scope is
+# overriding scout's user-scope registration.
+get_out="$(claude mcp get searxng 2>&1 || true)"
+if printf '%s\n' "$get_out" | grep -qi 'mcp-searxng'; then
+  : # resolved command is scout's npx mcp-searxng — expected
+else
+  conflict=1
+fi
+
+if [ "$conflict" -ne 0 ]; then
+  echo "WARNING: another 'searxng' registration is shadowing scout's."
+  echo "  scout registered: user scope, command 'npx -y $PIN', SEARXNG_URL=$SEARXNG_URL."
+  echo "  Another 'searxng' at a different scope or endpoint is overriding it"
+  echo "  (project and local scope both win over user scope), so the SearXNG MCP"
+  echo "  will fail to connect until the conflict is cleared."
+  echo
+  echo "  Fix: remove the NON-scout entry, keeping scout's user-scope one. Try:"
+  echo "    claude mcp remove searxng -s project"
+  echo "  (or '-s local' if the stray entry is at local scope). Do NOT remove the"
+  echo "  user-scope entry — that is scout's. Then re-run this script if needed."
+else
+  echo "no scope conflict detected"
+fi
+
 echo
 echo "Done. If the entry shows Type: stdio, Command: npx, the pinned mcp-searxng arg, and SEARXNG_URL, the meta discovery backend is registered. Start scout with: scout meta"
