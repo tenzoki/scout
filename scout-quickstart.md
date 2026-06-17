@@ -112,3 +112,5 @@ claude mcp remove searxng -s project
 ```
 
 (If the stray entry were at user scope instead, use `-s user` — but scout's is the user-scope one, so the project-scope entry is normally the one to drop.)
+
+Note: the conflicting entry may be in a **home-level `~/.mcp.json`**, not a per-project one. Claude Code walks **up** from your cwd and treats the nearest `.mcp.json` as the project config, so a `~/.mcp.json` shadows scout's user-scope `searxng` everywhere under your home. `claude mcp remove searxng -s project` targets the **cwd's** `.mcp.json`, not necessarily the loaded one — so a `No MCP server found with name: searxng in .mcp.json` error means the entry lives higher up (usually `~/.mcp.json`). Re-run from there: `cd ~ && claude mcp remove searxng -s project`. (`claude mcp get searxng` shows the scope and which file defines it.)

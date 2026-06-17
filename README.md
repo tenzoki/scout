@@ -283,6 +283,14 @@ claude mcp remove searxng -s project
 
 (If the conflicting entry were instead at user scope, you'd remove that with `-s user` — but scout's is the user-scope one, so the project-scope entry is normally the one to drop.)
 
+A subtle variant: the conflicting registration may live in a **home-level `~/.mcp.json`** rather than a per-project one. Claude Code walks **up** from your current directory and treats the nearest `.mcp.json` it finds as the "project config (shared via `.mcp.json`)", so a `~/.mcp.json` in your home directory shadows scout's user-scope `searxng` in *every* directory under your home. The catch: `claude mcp remove searxng -s project` operates on the `.mcp.json` of your **current working directory**, not necessarily the one Claude actually loaded — so if you run it from a project subfolder and get `No MCP server found with name: searxng in .mcp.json`, the conflicting entry lives in a `.mcp.json` higher up, most often `~/.mcp.json`. Re-run from that directory so the command targets the right file:
+
+```bash
+cd ~ && claude mcp remove searxng -s project
+```
+
+To find which file defines it, `claude mcp get searxng` shows the scope, and the entry is in the `.mcp.json` of whichever directory Claude resolved it from.
+
 ## Language
 
 Default is English. scout ships professional-voice style profiles (for the report prose) and chat-voice profiles (for the compact summary it returns) in English and German. For other languages, it reads the English profile and applies the same intent in the target language.
