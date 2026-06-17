@@ -117,16 +117,17 @@ setlocal
 set "SCOUT_DIR=$InstallDir"
 set "SCOUT_BIN=$BinDir"
 if /i "%~1"=="--update"    ( powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/$Repo/main/install.ps1 | iex" & exit /b )
-if /i "%~1"=="--uninstall" ( del /q "%SCOUT_BIN%\scout-meta.ps1" 2>nul & rmdir /s /q "%SCOUT_DIR%" & echo scout removed. & del /q "%~f0" & exit /b 0 )
+if /i "%~1"=="--uninstall" ( del /q "%SCOUT_BIN%\scout-meta.ps1" 2>nul & rmdir /s /q "%SCOUT_DIR%" & echo scout removed. & (goto) 2>nul & del /q "%~f0" )
 if /i "%~1"=="--where"     ( echo %SCOUT_DIR% & exit /b 0 )
 if /i "%~1"=="meta" (
   rem Opt-in metasearch backend: best-effort start the local SearXNG container,
   rem then launch scout with the `meta` token dropped. The helper never
   rem hard-fails (WebSearch fallback on any error); we ignore its exit code by
-  rem design. cmd.exe's %* ignores `shift`, so we forward %2..%9 explicitly to
-  rem strip the leading `meta` argument.
+  rem design. cmd.exe's %* ignores `shift`, so to forward the unbounded verbatim
+  rem argument tail (matching install.sh's `shift` + "$@") we split the command
+  rem line on the first token: %%a captures `meta`, %%b is the rest verbatim.
   powershell -NoProfile -ExecutionPolicy Bypass -File "%SCOUT_BIN%\scout-meta.ps1"
-  claude --plugin-dir "%SCOUT_DIR%" --agent scout:scout %2 %3 %4 %5 %6 %7 %8 %9
+  for /f "tokens=1*" %%a in ("%*") do claude --plugin-dir "%SCOUT_DIR%" --agent scout:scout %%b
   exit /b
 )
 claude --plugin-dir "%SCOUT_DIR%" --agent scout:scout %*
@@ -176,7 +177,10 @@ if (Test-Path `$Settings) {
     try { `$rng.GetBytes(`$bytes) } finally { `$rng.Dispose() }
     `$hex = -join (`$bytes | ForEach-Object { `$_.ToString('x2') })
     `$lines[`$idx] = "`${indent}secret_key: ""`$hex"""
-    Set-Content -Path `$Settings -Value `$lines -Encoding UTF8
+    # Write BOM-free with LF endings, matching the committed file and the
+    # scout.cmd/scout-meta.ps1 writes. Windows PowerShell 5.1's -Encoding UTF8
+    # would emit a UTF-8 BOM, diverging byte-for-byte from the bash/sed path.
+    [System.IO.File]::WriteAllText(`$Settings, ((`$lines -join "``n") + "``n"), (New-Object System.Text.UTF8Encoding `$false))
   }
 }
 
