@@ -1,0 +1,24 @@
+{
+  "name": "scout",
+  "owner": {
+    "name": "Kai / qantr GmbH",
+    "url": "https://github.com/tenzoki"
+  },
+  "metadata": {
+    "description": "Marketplace for scout — a web research plugin for Claude Code.",
+    "version": "0.3.0"
+  },
+  "plugins": [
+    {
+      "name": "scout",
+      "source": "./",
+      "description": "Web research plugin for Claude Code. One agent (scout) runs breadth-first multi-source research with inline cross-source verification and writes a single cited report per run. Two-layer model: a breadth core that works immediately with no setup, and an optional depth layer (registered separately) for pages that need an interactive browser. Returns a compact cited summary plus the report path. Dispatch with `claude --agent scout:scout`.",
+      "version": "0.3.0",
+      "author": {
+        "name": "Kai / qantr GmbH"
+      },
+      "license": "MIT",
+      "homepage": "https://github.com/tenzoki/scout"
+    }
+  ]
+}
