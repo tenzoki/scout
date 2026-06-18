@@ -110,7 +110,10 @@ def _install_anthropic_patch(server, ChatAnthropic) -> None:
         self.llm = ChatAnthropic(
             model=model,
             api_key=os.getenv("ANTHROPIC_API_KEY"),
-            temperature=0.7,
+            # Extraction is a near-deterministic read-back of page text, not
+            # generation: temperature 0 keeps a long, dense filing from making
+            # the model wander or under-return. (Was 0.7.)
+            temperature=0,
         )
 
     server.BrowserUseServer._init_browser_session = _patched_init
