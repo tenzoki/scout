@@ -170,6 +170,29 @@ The script removes any existing user-scope `searxng`, adds it fresh under the **
 
 **Confirm and set expectations.** Read the script's verify output: it should show `Type: stdio`, `Command: npx`, the pinned `mcp-searxng` arg, and `SEARXNG_URL`. The script also runs a `== scope-conflict check ==` step — if it prints a WARNING that another `searxng` registration is shadowing scout's, surface that warning to the user in scout's voice the same way you surface the browser-use script output: name the conflicting scope/endpoint the script reports and give the fix command `claude mcp remove searxng -s project` (or `-s local`), keeping scout's user-scope entry. A `searxng` that is registered but failing to connect because of a scope conflict is **not** a success — do not report it as one; relay the warning and the fix, and let the user clear the conflict before re-running. On success (no conflict), tell the user: the meta backend is registered. Start scout with `scout meta` (not plain `scout`) so the SearXNG container comes up; scout then discovers URLs through SearXNG and each discovered source carries a `discovery: searxng` note in the report. If they run plain `scout`, or if the container is not up, scout discovers with WebSearch — no failure either way. Point them at the README's **Optional metasearch backend (SearXNG)** section for the full picture.
 
+## Optional: scope scout's shell access to `date` and `mkdir` only
+
+scout's agent definition grants the `Bash` tool, but it uses the shell for exactly two commands: `date` (to stamp the report's date-time, sourced from the machine rather than guessed) and `mkdir -p scout-workbench/research/` (to create the report directory on the first run). It never needs arbitrary shell.
+
+Claude Code does **not** let a plugin ship a permission allowlist that binds a dispatched agent's own `Bash` calls — permission rules are read from the `settings.json` precedence chain in the directory where you launch `scout` (enterprise → `~/.claude/settings.json` → the project's `.claude/settings.json` → `.claude/settings.local.json`), not from anything inside `~/.scout`. So the scoping is something **you** add to the project (or your home) settings, and this skill recommends it rather than installing it.
+
+To hold scout to just those two commands, add this to your project's `.claude/settings.json` (or `~/.claude/settings.json` to apply it to every project):
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(date:*)",
+      "Bash(mkdir:*)"
+    ]
+  }
+}
+```
+
+With this in place, scout's `date` and `mkdir` calls run without a prompt, and any other shell command (a `curl`, a `cat`, an `rm`) falls outside the allowlist — Claude Code prompts you before it runs, so nothing arbitrary executes silently. To make the boundary a hard wall, add a `deny` list as well (e.g. `"deny": ["Bash(curl:*)", "Bash(rm:*)"]`), which Claude Code refuses outright.
+
+**Known gap, stated plainly:** without this snippet, scout still only *calls* `date` and `mkdir` — but Claude Code may prompt you to approve a broader `Bash` permission, and approving it grants more than scout uses. The allowlist is the way to keep scout's shell access scoped to the two commands it actually runs. This is a recommendation, not an automatic install, because no plugin-level mechanism can apply it for you.
+
 ## What this skill does NOT do
 
 - Does not install `uv`/`uvx`, `npx`/Node, Docker, Claude Code, or a browser — it only checks and points at the install page if missing.

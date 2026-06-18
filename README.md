@@ -17,7 +17,12 @@ A user who never registers the depth layer keeps a fully working breadth researc
 
 ## What scout produces
 
-scout writes one cited report per run to `scout-workbench/research/<prefix>-<topic>.md` and returns a compact summary plus that path. The report is structured so every claim is auditable: **claim → sources → method → confidence → verification**, followed by a blocked-sources table and the full list of sources consulted.
+scout writes one cited report per run to `scout-workbench/research/<prefix>-<topic>.md` and returns a compact summary plus that path. The report has **two layers**:
+
+- **A reader-facing deliverable on top** — a headline table (one row per entity, each with a confidence and a method/source column), an executive summary, per-entity verification, and a sourced "behind the numbers" analysis section. This reads as a clean briefing.
+- **The full audit trail beneath** — the per-claim record where every figure is traceable: **claim → sources → method → confidence → verification**, followed by a blocked-sources table and the full list of sources consulted.
+
+The two are the same report, not alternatives. The deliverable layer is a *view* of the audit trail and can never state a figure more confidently than its underlying claim block warrants — every headline and summary number carries its confidence and a pointer to its source, so polish can never quietly over-claim provenance. If a primary source was reached but not actually read, the headline says so.
 
 scout returns only the compact summary inline — never the full report — so your calling session does not get re-flooded with the research traffic. That session-isolation is scout's whole reason to exist.
 
@@ -137,6 +142,25 @@ scout-workbench/research/<prefix>-<topic>.md
 `scout-workbench/` is scout's runtime workbench, created in your project on the first run (scout runs `mkdir -p scout-workbench/research/` itself). It is gitignored by the plugin source tree but lives in *your* project — keep it or commit it as you see fit.
 
 The `<prefix>` is a date-time stamp. The default renders as `YYYY-MM-DD_HH-MM` (e.g. `2026-06-14_13-45`). You can override it by setting the environment variable `SCOUT_FILE_PREFIX` to a `date(1)` strftime string — e.g. `export SCOUT_FILE_PREFIX='%Y%m%d-%H%M%S'` for full-year + seconds precision. Default keeps existing reports sorting consistently; change it only on a clean project.
+
+### scout's shell access (and how to scope it)
+
+scout runs two shell commands and no others: `date` (to stamp the report's date-time from the machine instead of guessing) and `mkdir -p scout-workbench/research/` (to create the report directory on the first run). To do this its agent definition grants Claude Code's built-in `Bash` tool — but it is **not** an agent-dispatch tool, and scout stays single-agent.
+
+A plugin cannot ship a permission rule that binds its agent's own `Bash` calls — Claude Code reads permissions from the `settings.json` in the directory where you launch `scout` (and `~/.claude/settings.json`), not from `~/.scout`. To hold scout to exactly those two commands, add this to your project's `.claude/settings.json` (or `~/.claude/settings.json` for every project):
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(date:*)",
+      "Bash(mkdir:*)"
+    ]
+  }
+}
+```
+
+With this in place, `date` and `mkdir` run without a prompt and any other shell command falls outside the allowlist, so Claude Code prompts you before running it. Without the snippet scout still only *calls* `date` and `mkdir`, but Claude Code may prompt you to approve a broader `Bash` permission — approving that grants more than scout uses, so the allowlist is the way to keep its shell access scoped. `/scout:setup` walks through the same recommendation.
 
 ## Optional depth layer (browser-use)
 
