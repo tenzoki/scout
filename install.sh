@@ -12,6 +12,14 @@
 #   Update later:      scout --update
 #   Remove:            scout --uninstall
 #
+# Depth-layer key (browser-use):
+#   Update + pin key:  scout --update --key sk-ant-...
+#   Reset key only:    scout --key sk-ant-...        (re-registers depth layer, no re-download)
+#   (The equals form scout --key=sk-ant-... works too. The key is exported as
+#   BROWSERUSE_ANTHROPIC_KEY and never printed. On a shared machine prefer the
+#   env-prefix form  BROWSERUSE_ANTHROPIC_KEY=sk-ant-... scout  — an argv key can
+#   appear in shell history and in `ps aux` while the command runs.)
+#
 # Why this exists: the marketplace path clones over git (breaks when a user's
 # git is configured for SSH or has no key) and its cache is not reliably
 # replaced on update/uninstall. This path avoids all of that — it is just a
@@ -77,6 +85,59 @@ cat > "$LAUNCHER" <<EOF
 # scout launcher — loads the plugin directly from a folder (no cache, no git).
 set -euo pipefail
 SCOUT_DIR="$INSTALL_DIR"
+
+# --- Pre-parse: pull out --key <val> / --key=<val> before the command case. ---
+# A pinned key is exported as BROWSERUSE_ANTHROPIC_KEY (the var the installer and
+# register script already understand) and stripped from the positional args so
+# the existing case sees only real commands. The key is NEVER printed.
+SCOUT_KEY_GIVEN=0
+SCOUT_REMAINING=()
+while [ "\$#" -gt 0 ]; do
+  case "\$1" in
+    --key)
+      if [ "\$#" -lt 2 ] || [ -z "\${2:-}" ]; then
+        echo "scout: --key requires a value" >&2
+        exit 2
+      fi
+      export BROWSERUSE_ANTHROPIC_KEY="\$2"
+      SCOUT_KEY_GIVEN=1
+      shift 2
+      ;;
+    --key=*)
+      SCOUT_KEY_VAL="\${1#--key=}"
+      if [ -z "\$SCOUT_KEY_VAL" ]; then
+        echo "scout: --key requires a value" >&2
+        exit 2
+      fi
+      export BROWSERUSE_ANTHROPIC_KEY="\$SCOUT_KEY_VAL"
+      SCOUT_KEY_GIVEN=1
+      shift
+      ;;
+    *)
+      SCOUT_REMAINING+=("\$1")
+      shift
+      ;;
+  esac
+done
+# Restore the surviving args (bash 3.2: expanding an empty array under set -u
+# is an error, so guard the empty case explicitly).
+if [ "\${#SCOUT_REMAINING[@]}" -gt 0 ]; then
+  set -- "\${SCOUT_REMAINING[@]}"
+else
+  set --
+fi
+
+# Standalone --key with no other command: instant key reset — re-register the
+# depth layer with the new key WITHOUT a full re-download, then exit.
+if [ "\$SCOUT_KEY_GIVEN" -eq 1 ] && [ "\$#" -eq 0 ]; then
+  BROWSERUSE_ANTHROPIC_KEY="\$BROWSERUSE_ANTHROPIC_KEY" bash "\$SCOUT_DIR/skills/setup/register-browser-use.sh"
+  rc=\$?
+  if [ "\$rc" -eq 0 ]; then
+    echo "scout: depth layer re-registered with the new key."
+  fi
+  exit \$rc
+fi
+
 case "\${1:-}" in
   --update)
     curl -fsSL "https://raw.githubusercontent.com/$REPO/main/install.sh" -o /tmp/scout-install.sh \

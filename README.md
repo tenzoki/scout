@@ -58,6 +58,20 @@ scout          # starts Claude Code with the scout agent loaded
 - **Uninstall:** `scout --uninstall`.
 - **Where it lives:** `scout --where` (prints the install dir).
 
+#### Pin or rotate the depth-layer key with `--key`
+
+If you use the optional depth layer (browser-use), you can pin or rotate its Anthropic key from the launcher in two forms:
+
+```bash
+scout --update --key sk-ant-...   # update AND re-register the depth layer with this key
+scout --key sk-ant-...            # reset the key only — re-registers the depth layer, no re-download
+```
+
+Both forms also accept the equals spelling (`--key=sk-ant-...`). The key is exported as `BROWSERUSE_ANTHROPIC_KEY` for the registration and is never printed.
+
+- **Security caveat.** A key passed in `argv` can land in your shell history and is visible in `ps aux` while the command runs. On a shared machine, prefer the env-prefix form `BROWSERUSE_ANTHROPIC_KEY=sk-ant-... scout --update` or the register script's hidden interactive prompt (`bash ~/.scout/skills/setup/register-browser-use.sh`) instead.
+- **Bootstrap quirk (first time only).** `--key` is parsed by the *currently installed* launcher, so the very first update from a launcher that predates this flag won't recognise it. Do that one update with the env-prefix form — `BROWSERUSE_ANTHROPIC_KEY=sk-ant-... scout --update` — and from then on `--key` works.
+
 ## Quick start (Windows)
 
 Windows gets the same no-git path. Paste this one line into **cmd.exe** or
@@ -186,7 +200,7 @@ This pins the key into the **browser-use MCP server only** — so you do **not**
 
 - **Optional.** scout's breadth core needs no key; leave the var unset and install/update behave exactly as before, touching no existing browser-use registration.
 - **Best-effort.** If a prerequisite is missing (`uvx`, the `claude` CLI), the installer warns and still finishes — the breadth core is installed regardless.
-- **Rotate the key** by re-running update with the var set: `BROWSERUSE_ANTHROPIC_KEY=sk-ant-new scout --update` (`$env:BROWSERUSE_ANTHROPIC_KEY="sk-ant-new"; scout --update` on Windows). A plain update with the var unset leaves the existing registration alone.
+- **Rotate the key** by re-running update with the var set: `BROWSERUSE_ANTHROPIC_KEY=sk-ant-new scout --update` (`$env:BROWSERUSE_ANTHROPIC_KEY="sk-ant-new"; scout --update` on Windows). A plain update with the var unset leaves the existing registration alone. On mac/Linux you can also use the launcher flag — `scout --update --key sk-ant-new` to update and rotate, or `scout --key sk-ant-new` to rotate without re-downloading (see [Pin or rotate the depth-layer key with `--key`](#pin-or-rotate-the-depth-layer-key-with---key); the env-prefix form is safer on shared machines because an argv key is visible in `ps aux` and shell history).
 - **Caveat.** The pinned key is stored in plaintext in your user-scope MCP config (`~/.claude.json`, or `%USERPROFILE%\.claude.json` on Windows).
 
 ### Register the MCP server
