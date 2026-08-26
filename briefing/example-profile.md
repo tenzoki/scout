@@ -49,11 +49,14 @@ boundary of a judgement call sits, as a number or a rule wherever one exists: "a
 below 15 billion parameters" is researchable, "small models" is not. The three
 sections below are written to that standard, so read one before you write your own.
 
-**What the caps bound.** The four caps bound one section, not one morning. A profile
-with three sections and `max-pages` at 40 can fetch 120 pages in a run, and one with
-`max-minutes` at 15 can take 45 minutes plus the merge. The worst case is the number
-of sections times the cap, and the run prints that arithmetic before it starts, so
-the number is in front of you rather than in your head.
+**What the caps bound.** The four caps bound one section, not one morning, and the two
+worst cases do not have the same shape. Pages are simply the number of sections times
+`max-pages`. Minutes carry two additions the cap itself does not show: the watchdog
+allows each dispatch `max-minutes` plus a five-minute grace margin before it kills the
+dispatch, and the merge is a dispatch like any other, so the enforced ceiling is
+(sections + 1) x (`max-minutes` + 5) minutes rather than sections x `max-minutes`. The
+run prints both worst cases with your own numbers filled in before it starts, so read
+them there rather than working them out in your head.
 
 `yield-target` is how many genuinely new items a section aims for, and reaching it
 ends that section early. `max-hops` is how far the agent may follow links away from a

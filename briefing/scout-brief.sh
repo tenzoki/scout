@@ -13,9 +13,9 @@
 #
 # The profile's own directory is the run anchor: the script changes into it
 # before dispatching anything, so every relative path the agents write resolves
-# there regardless of the working directory cron happened to hand us.
+# there regardless of the working directory the caller happened to hand us.
 #
-# Exit codes (a cron wrapper can act on these):
+# Exit codes (a caller or a wrapper can act on these):
 #   0  the merge ran and a briefing was written
 #   1  the run reached the merge and no usable briefing came out of it
 #   2  the run stopped before a briefing could be attempted — a bad argument, an
@@ -153,7 +153,7 @@ WORK="$(mktemp -d "${TMPDIR:-/tmp}/scout-brief.XXXXXX")"
 # the EXIT trap sees `$?` as 0, because the status still belongs to the last
 # command that ran rather than to the abort. Reading it and re-exiting it hands
 # the caller 0, which is the code this contract reserves for "a briefing was
-# written" — the one answer cron must never get for a morning that produced
+# written" — the one answer a caller must never get for a morning that produced
 # nothing. The trap therefore trusts `$?` only where FINISHED says it was chosen.
 FINISHED=""
 STAGE=2
@@ -441,7 +441,7 @@ dispatch() {
     # The group first, the bare pid as the fallback for a child that never got a
     # group of its own. SIGTERM lets the agent stop and write what it has; the
     # SIGKILL ten seconds later is what bounds a child that ignores SIGTERM.
-    # Without the escalation `wait` below has no bound at all, and a cron job that
+    # Without the escalation `wait` below has no bound at all, and a run that
     # hangs forever is worse than one that fails.
     kill -TERM -"$cpid" 2>/dev/null || kill -TERM "$cpid" 2>/dev/null || true
     grace=0
@@ -456,8 +456,8 @@ dispatch() {
   rc=0
   # The redirection is on the builtin, not on the child: bash announces a job that
   # died by signal ("… Terminated: 15", "… Killed: 9") on the shell's stderr as it
-  # reaps it, and under cron that line is mailed to the operator on every timeout
-  # the design intends, reading as a fault in this script. Redirecting `wait`
+  # reaps it, and that line lands on the caller's stderr on every timeout the
+  # design intends, reading as a fault in this script. Redirecting `wait`
   # itself suppresses the announcement and still yields the child's status
   # (measured on bash 3.2.57; `set -m` does not suppress it).
   { wait "$cpid"; } 2>/dev/null || rc=$?

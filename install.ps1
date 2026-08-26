@@ -158,7 +158,9 @@ claude --plugin-dir "%SCOUT_DIR%" --agent scout:scout %*
   # Write as UTF-8 without BOM — a BOM breaks `@echo off` parsing in cmd.exe.
   [System.IO.File]::WriteAllText($Launcher, $launcherBody, (New-Object System.Text.UTF8Encoding $false))
 
-  # scout-meta.ps1 helper body — the Windows `meta` port of install.sh:95-124.
+  # scout-meta.ps1 helper body — the Windows `meta` port of the bash `meta)` arm
+  # in install.sh. Cited by that anchor and not by line number: a line number here
+  # goes stale the moment anything is inserted above it in the other file.
   # Generates the SearXNG secret_key with PowerShell-native crypto (no external
   # crypto tool), injects it into the INSTALLED settings only, starts the
   # container with `docker compose` (v2), health-waits, and always falls back to
@@ -186,7 +188,7 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
 
 # Generate a real secret_key into the INSTALLED settings on first start if it is
 # still empty/placeholder. Never touches the repo file. Placeholder set matches
-# the bash grep -E at install.sh:106 — empty, "", or CHANGE_ME.
+# the secret_key grep -Eq inside install.sh's bash meta) arm — empty, "", or CHANGE_ME.
 if (Test-Path `$Settings) {
   `$lines = Get-Content -Path `$Settings
   `$idx = -1
