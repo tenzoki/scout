@@ -68,13 +68,15 @@ The section list is in the profile's order, which is the briefing's order. Treat
 
 That is not a style preference. `ledger-retrieve.sh` is the only code in the whole repository that reads a ledger, which is what makes retrieval a substitutable seam: a better backend replaces one file and touches no agent. A second reader anywhere defeats it. Testing whether the file exists is not reading it; appending to it does not read it either.
 
-**Once per candidate item, call the retriever.** Compose the item's one-sentence record — *actor, action, object* — and its normalised entity names, then run via `Bash`:
+**Once per candidate item, call the retriever.** Compose the item's one-sentence record — *actor, action, object* — and its normalised entity names, then run via `Bash`. The single quotes are part of the template, not decoration:
 
 ```bash
-"<retriever>" --ledger "<ledger>" --window-days <ledger-window-days> --entities "<name>|<name>" --text "<the item's one sentence>"
+'<retriever>' --ledger '<ledger>' --window-days <ledger-window-days> --entities '<name>|<name>' --text '<the item’s one sentence>'
 ```
 
 Entity names are lowercased, stripped of punctuation and stripped of a corporate suffix (`inc`, `corp`, `ltd`, `gmbh`, `plc`, `ag`, `sa`). The section report's claim block usually carries an `- **Entities:**` line already; **reuse it** rather than normalising the names a second time, and compose them yourself only when the line is absent.
+
+**Reusing that line carries page text into a command line, so quote it as data.** The names and the sentence were written by whoever controls the pages scout crawled, and a double-quoted shell argument still runs `$(...)`, backticks and `\` — the same reason the ledger append below uses a quoted heredoc. Pass both values **single-quoted**, exactly as the template shows, and build the command no other way. A single-quoted string ends at the first `'`, so replace every `'` in a value with `’` (U+2019) before you pass it: the retriever reads `--entities` and `--text` as ordinary argv values and matches on words, so nothing you need is lost.
 
 It prints the ledger entries worth judging, verbatim, in rank order, and **no score of any kind**. There is no number to threshold and none is coming: a similarity number cannot tell one story at two outlets from two different announcements by one company, which is exactly the discrimination you are here to make. Exit 0 is a well-formed call, including one that matches nothing and one whose ledger file does not exist — that last is the first morning, and on it every item is new. Exit 2 means your call is malformed and the message names the argument at fault: fix that argument and call once more.
 
