@@ -66,6 +66,17 @@ RETRIEVER="$SELF_DIR/ledger-retrieve.sh"
 # --- Helpers ------------------------------------------------------------------
 say()  { printf '%s\n' "$*"; }
 warn() { printf '%s\n' "$*" >&2; }
+
+# This script's own stderr, saved before anything can redirect it, and the one
+# message channel a signal trap can rely on. A trap executes inside whatever
+# redirection is in force where it fires, and the place on_signal fires is
+# dispatch()'s `{ wait "$cpid"; } 2>/dev/null` — measured: every line the trap
+# printed with warn went to /dev/null, so a Ctrl-C stopped the agent in complete
+# silence and, against a child that ignores SIGTERM, looked like a ten-second
+# hang with no explanation. Only signal reporting uses this; ordinary warnings
+# stay on warn, which is what a caller redirecting stderr expects to catch.
+exec 9>&2
+alert() { printf '%s\n' "$*" >&9; }
 # FINISHED marks the exit as chosen rather than stumbled into; see the EXIT trap.
 # Assigning it before the trap exists is harmless: it is read only from there.
 die2() { printf 'scout brief: %s\n' "$*" >&2; FINISHED=1; exit 2; }
@@ -115,6 +126,113 @@ slugify() {
   printf '%s' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]' | LC_ALL=C sed 's/[^a-z0-9]\{1,\}/-/g; s/^-\{1,\}//; s/-\{1,\}$//'
 }
 
+# --- Ending a dispatched child ------------------------------------------------
+# The pid of the dispatched child while one is running, empty otherwise.
+# dispatch() maintains it; the signal trap installed beside the EXIT trap reads
+# it. It is deliberately not `local` to dispatch: the trap runs in this shell.
+CURRENT_CHILD=""
+INTERRUPTED=""
+
+# Ends a dispatched child's whole process group. SIGTERM first, so the agent can
+# stop and write what it has; SIGKILL ten seconds later, which is what bounds a
+# child that ignores SIGTERM. `-$pid` addresses the process group `set -m` gave
+# the child in dispatch(); the bare pid is the fallback for a child that never
+# got a group of its own.
+#
+# One escalation, two callers: the watchdog when the wall-clock cap fires, and
+# the signal trap below when the run is interrupted. They were two doors into the
+# same harm and only the first was closed; sharing the code is what stops the
+# second from drifting open again.
+end_child_group() {
+  local pid="$1" grace=0
+  kill -TERM -"$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+  while [ "$grace" -lt 10 ]; do
+    sleep 1
+    kill -0 "$pid" 2>/dev/null || return 0
+    grace=$((grace + 1))
+  done
+  kill -KILL -"$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+  return 0
+}
+
+# What Ctrl-C at a terminal, or a `kill` from a wrapper, has to do here.
+#
+# `set -m` in dispatch() gives the child its own process group, which is what
+# lets the watchdog take its descendants — and it is also why a terminal's SIGINT
+# never reaches it: a terminal signals the foreground process group, which is
+# this script's and not the child's. Measured on bash 3.2.57 against the version
+# before this trap existed, signalling the script's group four seconds into a
+# run:
+#
+#   SIGINT   script exits 2; child and grandchild survive with ppid 1. The
+#            watchdog survives too — bash sets SIGINT to ignore in an
+#            asynchronous command when job control is off — so the orphan is
+#            bounded at max-minutes + 5 rather than unbounded, and spends the
+#            whole of it.
+#   SIGTERM  script exits 143, SIGHUP 129 — neither of them a code this
+#            contract defines. The watchdog dies with the script, and the child
+#            and grandchild survive with nothing bounding them at all.
+#
+# Under `depth: on` that orphan is holding a headless browser and its MCP
+# servers, which is the harm the wall-clock watchdog exists to prevent, reached
+# through the interrupt door instead of the timeout one.
+#
+# The escalation runs in a background subshell rather than inline so this shell
+# is free to `wait` and reap. A killed but unreaped child is a zombie, a zombie
+# answers `kill -0` for as long as it exists, and an inline grace loop would
+# therefore burn its full ten seconds on a process that died in the first one —
+# ten seconds of apparent hang after every Ctrl-C.
+#
+# The exit code is left to the EXIT trap: FINISHED stays empty, so the run lands
+# on STAGE. That is 2 while the sections run and 1 once the merge has been
+# dispatched, which is what the contract at the top of this file already says
+# about a stop this script did not choose, and what SIGINT already measured as.
+# SIGTERM and SIGHUP now land there too instead of on 143 and 129.
+on_signal() {
+  local sig="$1" pid="$CURRENT_CHILD"
+  if [ -n "$INTERRUPTED" ]; then
+    # A second signal, arriving while the first is still waiting on the child —
+    # an operator who does not want to wait out the grace. The escalation
+    # subshell carries the child through to SIGKILL with or without this shell,
+    # so the wait can be abandoned without abandoning the child. Measured on
+    # bash 3.2.57: a repeat of the *same* signal never reaches here, because
+    # bash does not re-enter a handler for the signal it is already running; a
+    # second, different one does.
+    alert "scout brief: $sig again — leaving the agent to the escalation already running, which will SIGKILL it within 10s."
+    exit
+  fi
+  INTERRUPTED=1
+  if [ -z "$pid" ]; then
+    alert "scout brief: $sig — stopping. No agent was running."
+    exit
+  fi
+  alert "scout brief: $sig — stopping the dispatched agent and its descendants (SIGTERM now, SIGKILL in 10s)."
+  # `trap ''` rather than `trap -`, and it is the whole point of the branch
+  # above. A group signal reaches this subshell too — it is in this script's
+  # process group, not the child's — and measured with `trap -` a second signal
+  # killed the escalation and left the child alive with the script already gone,
+  # which is the orphan this trap exists to prevent, reintroduced by the escape
+  # hatch. Ignoring the three signals makes it immune, and it is bounded: it
+  # exits within a second of the child dying and after ten seconds regardless.
+  # fd 9 is closed because it may outlive this shell and has no business holding
+  # the operator's terminal open.
+  ( trap '' INT TERM HUP; trap - EXIT; end_child_group "$pid" ) > /dev/null 2>&1 9>&- &
+  # Nothing kills that subshell afterwards and nothing waits for it. It polls the
+  # child once a second and returns as soon as the child is gone, so a `kill` and
+  # a `wait` here would only be a second way to do what it already does — and
+  # with the signals ignored above, the `kill` would not land and the `wait`
+  # would block out the whole grace on every interrupt.
+  #
+  # The redirection is on the builtin for the same reason dispatch()'s is: bash
+  # announces a job it reaps after a signal death on this shell's stderr, and
+  # that line would read as a fault in this script rather than as the stop the
+  # operator asked for.
+  { wait "$pid"; } 2>/dev/null || true
+  CURRENT_CHILD=""
+  alert "scout brief: the agent is stopped."
+  exit
+}
+
 # --- 1. The profile argument --------------------------------------------------
 if [ "$#" -lt 1 ] || [ -z "${1:-}" ]; then
   usage
@@ -158,6 +276,13 @@ WORK="$(mktemp -d "${TMPDIR:-/tmp}/scout-brief.XXXXXX")"
 FINISHED=""
 STAGE=2
 trap 'rc=$?; rm -rf "$WORK" 2>/dev/null || true; if [ -n "$FINISHED" ]; then exit "$rc"; fi; exit "$STAGE"' EXIT
+
+# The EXIT trap cleans the working directory on an interrupt and always did. What
+# it cannot do is reach the dispatched child, which lives in a process group of
+# its own; see on_signal above for why, and for what was measured without this.
+trap 'on_signal INT' INT
+trap 'on_signal TERM' TERM
+trap 'on_signal HUP' HUP
 
 # Normalised copy for parsing only. Agents are always given $PROFILE itself.
 tr -d '\r' < "$PROFILE" > "$WORK/profile.txt"
@@ -421,36 +546,35 @@ dispatch() {
   # outlive the cap that exists to bound them and keep fetching and spending while
   # the next section runs.
   set -m
-  "${cmd[@]}" < /dev/null > "$out" 2> "$err" &
+  # `9>&-` closes the saved-stderr channel for the agent: it is this script's
+  # own reporting line and nothing an agent should inherit a handle on.
+  "${cmd[@]}" < /dev/null > "$out" 2> "$err" 9>&- &
   cpid=$!
   set +m
+  # Published for the signal trap, which is the only other thing that may end
+  # this child. Cleared the moment `wait` returns below, so a trap that fires
+  # between two dispatches signals nothing.
+  CURRENT_CHILD="$cpid"
 
   # The watchdog polls rather than sleeping the whole limit in one go, and its
   # own output goes nowhere. Both matter: a single long `sleep` survives the kill
   # below as an orphan and keeps holding this script's stdout, which hangs any
   # caller that pipes us (`scout brief p.md | tee log`) for the length of the cap.
   # `trap - EXIT` so the subshell, which inherits this shell's traps, cannot
-  # delete the working directory out from under the run when it exits.
-  ( trap - EXIT
+  # delete the working directory out from under the run when it exits; the three
+  # signals for the same reason, so a signalled watchdog runs the escalation once
+  # rather than racing the copy on_signal starts.
+  ( trap - EXIT INT TERM HUP
     SECONDS=0
     while [ "$SECONDS" -lt "$limit" ]; do
       sleep 1
       kill -0 "$cpid" 2>/dev/null || exit 0
     done
     : > "$fired"
-    # The group first, the bare pid as the fallback for a child that never got a
-    # group of its own. SIGTERM lets the agent stop and write what it has; the
-    # SIGKILL ten seconds later is what bounds a child that ignores SIGTERM.
     # Without the escalation `wait` below has no bound at all, and a run that
-    # hangs forever is worse than one that fails.
-    kill -TERM -"$cpid" 2>/dev/null || kill -TERM "$cpid" 2>/dev/null || true
-    grace=0
-    while [ "$grace" -lt 10 ]; do
-      sleep 1
-      kill -0 "$cpid" 2>/dev/null || exit 0
-      grace=$((grace + 1))
-    done
-    kill -KILL -"$cpid" 2>/dev/null || kill -KILL "$cpid" 2>/dev/null || true ) > /dev/null 2>&1 &
+    # hangs forever is worse than one that fails. It is end_child_group's because
+    # the interrupt path needs the identical sequence.
+    end_child_group "$cpid" ) > /dev/null 2>&1 &
   wpid=$!
 
   rc=0
@@ -461,6 +585,7 @@ dispatch() {
   # itself suppresses the announcement and still yields the child's status
   # (measured on bash 3.2.57; `set -m` does not suppress it).
   { wait "$cpid"; } 2>/dev/null || rc=$?
+  CURRENT_CHILD=""
   kill -TERM "$wpid" 2>/dev/null || true
   wait "$wpid" 2>/dev/null || true
   # A child that beat the watchdog to the finish by a second keeps its own code:
@@ -550,23 +675,32 @@ json_string_field() {
 # diagnosis in result is observed. The specific phrases below are read out of the
 # shipped binary's own health classifier, not provoked — forcing a 429 spends a
 # real share of the user's usage window. That is why an api_error whose prose
-# matches nothing known falls through to plain "failed" rather than to a guess:
+# matches nothing known falls through to plain `fail` rather than to a guess:
 # where the evidence is second-hand the code degrades to what it said before,
 # and a phrase list that turns out to be wrong costs a label, never a wrong one.
+#
+# What it yields is a token, not a sentence: `ok`, `timeout`, `budget`, `auth`,
+# `limit`, `fail`. The prose belongs to outcome_label() below and is written in
+# exactly one place, because this verdict has two consumers — the operator, who
+# reads the sentence, and the counting loop after the section loop, which acts on
+# it. When both read the same prose, rewording a label is an ordinary edit that
+# silently switches a warning off and leaves a run looking exactly like one where
+# nothing went wrong. That is the failure this whole classifier was added to
+# remove, so it may not be the classifier's own failure mode.
 outcome_of() {
   local rc="$1" out="$2" reason result
   if [ "$rc" -eq 0 ]; then
-    printf 'succeeded\n'
+    printf 'ok\n'
     return 0
   fi
   if [ "$rc" -eq 143 ]; then
-    printf 'timed out\n'
+    printf 'timeout\n'
     return 0
   fi
   # Budget first, and still by the whole-file grep the spike verified against a
   # real error_max_budget_usd object rather than by the extractor below.
   if [ -f "$out" ] && grep -q 'budget_exhausted' "$out"; then
-    printf 'failed — exceeded its budget\n'
+    printf 'budget\n'
     return 0
   fi
   if [ -f "$out" ]; then
@@ -577,16 +711,50 @@ outcome_of() {
       result="$(json_string_field result "$out" | LC_ALL=C tr 'A-Z' 'a-z')"
       case "$result" in
         *"please run /login"* | *"not logged in"* | *"invalid api key"* | *401*)
-          printf 'failed — not authenticated\n'
+          printf 'auth\n'
           return 0 ;;
+        # Markers of a host that cannot spend right now, which is one useful
+        # class. They do not share an ending: most of them clear on their own and
+        # an empty credit balance clears when someone adds credit, so the warning
+        # this token drives has to name both. The classification stays one token
+        # because the operator's next move — stop re-running until something
+        # changes — is the same for all of them.
+        #
+        # Both spellings of the credit-balance marker, and the reason: the
+        # shipped binary's own health classifier is a regex reading
+        # `credit balance (?:is )?too low`, while the marker list beside it in
+        # the same binary — which is where this phrase list came from — writes
+        # only the shorter one. Anthropic's API says "Your credit balance is too
+        # low to access the Anthropic API", so the shorter marker alone misses
+        # the ordinary case and the whole branch would fall through to `fail`.
         *"rate limited"* | *"rate_limit"* | *"usage limit reached"* | \
-        *"credit balance too low"* | *overloaded* | *529*)
-          printf 'failed — rate limited or over the usage limit\n'
+        *"credit balance too low"* | *"credit balance is too low"* | \
+        *overloaded* | *529*)
+          printf 'limit\n'
           return 0 ;;
       esac
     fi
   fi
-  printf 'failed\n'
+  printf 'fail\n'
+}
+
+# The one place an outcome token becomes English. Three callers: the per-section
+# line the operator watches, the `outcome:` field in the merge prompt (where the
+# briefer reads it as prose and prose is the point), and nothing else — the
+# counting loop switches on the token instead.
+#
+# The default arm is not decoration. An unknown token has to render as a plain
+# failure rather than as an empty string, or a token added here and forgotten
+# there would print a section line with nothing after the dash.
+outcome_label() {
+  case "$1" in
+    ok)      printf 'succeeded\n' ;;
+    timeout) printf 'timed out\n' ;;
+    budget)  printf 'failed — exceeded its budget\n' ;;
+    auth)    printf 'failed — not authenticated\n' ;;
+    limit)   printf 'failed — rate limited, over the usage limit, or out of credit\n' ;;
+    *)       printf 'failed\n' ;;
+  esac
 }
 
 # The newest report whose name ends -<slug>.md and whose modification time is at
@@ -617,7 +785,11 @@ EOF
 }
 
 # --- 6. The sections, one after another ---------------------------------------
+# SEC_OUTCOME holds the token outcome_of yields; SEC_LABEL the sentence
+# outcome_label renders from it. Two arrays rather than one so the label is
+# rendered once per section and nothing downstream has to read prose back.
 SEC_OUTCOME=()
+SEC_LABEL=()
 SEC_RC=()
 SEC_MINUTES=()
 SEC_REPORT=()
@@ -662,14 +834,16 @@ while [ "$i" -lt "$SEC_COUNT" ]; do
   ended_at="$(date +%s)"
   elapsed=$((ended_at - started_at))
   outcome="$(outcome_of "$rc" "$WORK/sec/$idx.stdout")"
+  label="$(outcome_label "$outcome")"
   report="$(find_report "$slug" "$started_at")"
 
   SEC_OUTCOME[$i]="$outcome"
+  SEC_LABEL[$i]="$label"
   SEC_RC[$i]="$rc"
   SEC_MINUTES[$i]="$(LC_ALL=C awk -v s="$elapsed" 'BEGIN { printf "%.1f", s / 60 }')"
   SEC_REPORT[$i]="$report"
 
-  say "[$n/$SEC_COUNT] $heading — $outcome (exit $rc, ${SEC_MINUTES[$i]} min, report: ${report:-none})"
+  say "[$n/$SEC_COUNT] $heading — $label (exit $rc, ${SEC_MINUTES[$i]} min, report: ${report:-none})"
   if [ "$rc" -ne 0 ] && [ -s "$WORK/sec/$idx.stderr" ]; then
     say "        last lines of its error output:"
     sed 's/^/        | /' "$WORK/sec/$idx.stderr" | tail -n 5
@@ -695,9 +869,11 @@ AUTH_FAILURES=0
 LIMIT_FAILURES=0
 i=0
 while [ "$i" -lt "$SEC_COUNT" ]; do
+  # The token, never the sentence. This is the consumer that made the labels
+  # load-bearing prose; it no longer reads prose at all.
   case "${SEC_OUTCOME[$i]}" in
-    'failed — not authenticated')  AUTH_FAILURES=$((AUTH_FAILURES + 1)) ;;
-    'failed — rate limited'*)      LIMIT_FAILURES=$((LIMIT_FAILURES + 1)) ;;
+    auth)  AUTH_FAILURES=$((AUTH_FAILURES + 1)) ;;
+    limit) LIMIT_FAILURES=$((LIMIT_FAILURES + 1)) ;;
   esac
   i=$((i + 1))
 done
@@ -706,7 +882,17 @@ if [ "$AUTH_FAILURES" -gt 0 ]; then
   warn "scout brief: $AUTH_FAILURES of $SEC_COUNT $SEC_WORD could not authenticate. That is this host, not a quiet day: the briefing will be thin or empty for a reason that has nothing to do with the web. Run 'claude auth status' to see whether this machine is logged in."
 fi
 if [ "$LIMIT_FAILURES" -gt 0 ]; then
-  warn "scout brief: $LIMIT_FAILURES of $SEC_COUNT $SEC_WORD was refused for a rate or usage limit. Wait for the limit window to reset and run the profile again."
+  # Two endings, and the remedy has to name both. A rate or usage limit clears
+  # on its own and waiting is the whole answer; an empty credit balance does not
+  # clear on its own, and an operator told to wait for it re-runs on a schedule
+  # of their own, gets the identical refusal every time and learns nothing —
+  # worse than the bare "failed" this branch was built to improve on.
+  #
+  # The verb agrees with LIMIT_FAILURES, which is the subject, and not with
+  # SEC_COUNT, which is what $SEC_WORD agrees with. Two of two sections read
+  # "2 of 2 sections was refused" before this.
+  if [ "$LIMIT_FAILURES" -eq 1 ]; then LIMIT_VERB="was"; else LIMIT_VERB="were"; fi
+  warn "scout brief: $LIMIT_FAILURES of $SEC_COUNT $SEC_WORD $LIMIT_VERB refused because this host cannot spend right now. If that is a rate or usage limit it clears on its own: wait for the window to reset and run the profile again. If it is an empty credit balance it does not clear on its own, and on an API-key install the account needs credit before any re-run can do anything."
 fi
 if [ $((AUTH_FAILURES + LIMIT_FAILURES)) -gt 0 ]; then
   warn "scout brief: the exit code does not reflect this — per-section outcomes never change it. Each section's outcome is in the briefing."
@@ -732,7 +918,7 @@ fi
   while [ "$i" -lt "$SEC_COUNT" ]; do
     printf -- '- heading: %s\n' "${SEC_HEADING[$i]}"
     printf '  slug: %s\n' "${SEC_SLUG[$i]}"
-    printf '  outcome: %s\n' "${SEC_OUTCOME[$i]}"
+    printf '  outcome: %s\n' "${SEC_LABEL[$i]}"
     printf '  exit-code: %s\n' "${SEC_RC[$i]}"
     printf '  elapsed-minutes: %s\n' "${SEC_MINUTES[$i]}"
     printf '  report: %s\n' "${SEC_REPORT[$i]:-none}"
