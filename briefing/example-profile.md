@@ -74,6 +74,12 @@ the line `seeds:`. They are visited before anything the agent searches for. A se
 with no `seeds` line finds its own starting points, which is what the middle section
 below demonstrates.
 
+Write the `seeds:` line at the left margin and begin each URL with a hyphen and a
+space. Indenting the URLs under it is fine, and so is a blank line between `seeds:`
+and the first one. A bullet written any other way, `*` for one, is not read as a
+seed: the run then prints a warning naming the section and researches it with no
+seeds, rather than dropping them somewhere you cannot see.
+
 **What `ledger-window-days` does.** The briefing tells you what it has not told you
 before. Every published item goes into a ledger, and each candidate in the next run
 is tested against it. `ledger-window-days` decides how far back that test looks:

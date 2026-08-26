@@ -49,7 +49,9 @@ RETRIEVER="$SELF_DIR/ledger-retrieve.sh"
 # --- Helpers ------------------------------------------------------------------
 say()  { printf '%s\n' "$*"; }
 warn() { printf '%s\n' "$*" >&2; }
-die2() { printf 'scout brief: %s\n' "$*" >&2; exit 2; }
+# FINISHED marks the exit as chosen rather than stumbled into; see the EXIT trap.
+# Assigning it before the trap exists is harmless: it is read only from there.
+die2() { printf 'scout brief: %s\n' "$*" >&2; FINISHED=1; exit 2; }
 
 usage() {
   cat >&2 <<'USAGE'
@@ -75,16 +77,25 @@ file_mtime() {
 # First value of a `key: value` line, matched at the start of a line only.
 # One awk, no pipeline: a `... | head -1` here would hand sed a SIGPIPE and
 # pipefail would turn a successful read into exit 141.
+#
+# Every awk, tr and sed stage that interprets profile text runs under LC_ALL=C.
+# length(), tolower() and the character classes are locale-sensitive, the profile
+# is UTF-8 whatever the machine's locale says, and a parse that reads one way on a
+# German machine and another way on an English one is not a parse anyone can
+# reason about.
 get_field() {
-  awk -v k="$1" 'index($0, k ":") == 1 { v = substr($0, length(k) + 2); sub(/^[ \t]+/, "", v); sub(/[ \t\r]+$/, "", v); print v; exit }' "$2"
+  LC_ALL=C awk -v k="$1" 'index($0, k ":") == 1 { v = substr($0, length(k) + 2); sub(/^[ \t]+/, "", v); sub(/[ \t\r]+$/, "", v); print v; exit }' "$2"
 }
 
 is_uint() {
   case "${1:-}" in '' | *[!0-9]*) return 1 ;; *) return 0 ;; esac
 }
 
+# Pinned per command rather than for the function: exporting LC_ALL here would
+# also hand it to the agents this script dispatches, whose text is not ours to
+# recode.
 slugify() {
-  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]\{1,\}/-/g; s/^-\{1,\}//; s/-\{1,\}$//'
+  printf '%s' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]' | LC_ALL=C sed 's/[^a-z0-9]\{1,\}/-/g; s/^-\{1,\}//; s/-\{1,\}$//'
 }
 
 # --- 1. The profile argument --------------------------------------------------
@@ -110,7 +121,26 @@ ANCHOR="$(dirname "$PROFILE")"
 [ -x "$RETRIEVER" ] || die2 "the retrieval script is not executable: $RETRIEVER (chmod +x it)"
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/scout-brief.XXXXXX")"
-trap 'rm -rf "$WORK"' EXIT
+
+# The three codes at the top of this file are the whole contract, so every path
+# out of the script has to land on one of them — including a `set -e` or `set -u`
+# abort, which names no code of its own. Two variables carry that:
+#
+#   FINISHED  set only where this script decides its own answer, which is die2 and
+#             the two explicit exits at the end. Empty means the run stopped
+#             somewhere it did not choose.
+#   STAGE     the code an unchosen stop carries: 2 until the merge is dispatched,
+#             1 from there on, matching the two definitions above.
+#
+# `$?` cannot stand in for FINISHED. Measured on bash 3.2.57: on a `set -u` abort
+# the EXIT trap sees `$?` as 0, because the status still belongs to the last
+# command that ran rather than to the abort. Reading it and re-exiting it hands
+# the caller 0, which is the code this contract reserves for "a briefing was
+# written" — the one answer cron must never get for a morning that produced
+# nothing. The trap therefore trusts `$?` only where FINISHED says it was chosen.
+FINISHED=""
+STAGE=2
+trap 'rc=$?; rm -rf "$WORK" 2>/dev/null || true; if [ -n "$FINISHED" ]; then exit "$rc"; fi; exit "$STAGE"' EXIT
 
 # Normalised copy for parsing only. Agents are always given $PROFILE itself.
 tr -d '\r' < "$PROFILE" > "$WORK/profile.txt"
@@ -119,10 +149,10 @@ tr -d '\r' < "$PROFILE" > "$WORK/profile.txt"
 # Profile-wide fields live above the first `## ` heading; below it every heading
 # opens a section. Splitting first keeps a section's own `regions:` line from
 # being read as a profile-wide field.
-awk '/^##[ \t]/ { exit } { print }' "$WORK/profile.txt" > "$WORK/preamble.txt"
+LC_ALL=C awk '/^##[ \t]/ { exit } { print }' "$WORK/profile.txt" > "$WORK/preamble.txt"
 
 mkdir -p "$WORK/sec"
-awk -v dir="$WORK/sec" '
+LC_ALL=C awk -v dir="$WORK/sec" '
   /^##[ \t]/ {
     n++
     line = $0
@@ -183,6 +213,17 @@ for pair in "yield-target:$P_YIELD" "max-pages:$P_PAGES" "max-hops:$P_HOPS" "max
   is_uint "$fval" || die2 "$fname is '$fval' in $PROFILE — it has to be a whole number of zero or more"
 done
 
+# Re-read every validated number in base 10 before anything computes with it.
+# The profile is a hand-edited column of caps and padding one with a zero is an
+# ordinary thing to do to a column, but bash reads a leading zero as octal, where
+# 08 and 09 do not exist. Without this, `max-minutes: 08` passes the loop above
+# and then breaks every $(( )) below it, taking LIMIT_SECONDS with it.
+P_YIELD=$((10#$P_YIELD))
+P_PAGES=$((10#$P_PAGES))
+P_HOPS=$((10#$P_HOPS))
+P_MINUTES=$((10#$P_MINUTES))
+P_WINDOW=$((10#$P_WINDOW))
+
 case "$P_DEPTH" in
   on|off) ;;
   *) die2 "depth is '$P_DEPTH' in $PROFILE — it has to be on or off" ;;
@@ -209,11 +250,16 @@ for hf in "$WORK"/sec/*.heading; do
   [ -f "$body" ] || printf '' > "$body"
 
   # The question is the section's prose: everything but its regions line and its
-  # seeds block.
-  awk '
+  # seeds block. The block accepts the two shapes a hand-editor writes besides the
+  # shipped one — an indented item, and a blank line between `seeds:` and the
+  # first item — because the profile's design is that nobody is fighting a schema,
+  # and because reading those as prose drops the seeds where no one can see it.
+  # The two awk programs here and below read one block and must stay in step.
+  LC_ALL=C awk '
     index($0, "regions:") == 1 { next }
     index($0, "seeds:") == 1   { inseeds = 1; next }
-    inseeds && /^-[ \t]/       { next }
+    inseeds && /^[ \t]*-[ \t]/ { next }
+    inseeds && /^[ \t]*$/      { next }
     { inseeds = 0; print }
   ' "$body" > "$WORK/sec/$idx.question"
   if ! grep -q '[^[:space:]]' "$WORK/sec/$idx.question"; then
@@ -222,11 +268,21 @@ for hf in "$WORK"/sec/*.heading; do
 
   get_field regions "$body" > "$WORK/sec/$idx.regions"
 
-  awk '
-    index($0, "seeds:") == 1 { inseeds = 1; next }
-    inseeds && /^-[ \t]/     { line = $0; sub(/^-[ \t]+/, "", line); sub(/[ \t]+$/, "", line); print line; next }
-    inseeds                  { inseeds = 0 }
+  LC_ALL=C awk '
+    index($0, "seeds:") == 1   { inseeds = 1; next }
+    inseeds && /^[ \t]*-[ \t]/ { line = $0; sub(/^[ \t]*-[ \t]+/, "", line); sub(/[ \t]+$/, "", line); print line; next }
+    inseeds && /^[ \t]*$/      { next }
+    inseeds                    { inseeds = 0 }
   ' "$body" > "$WORK/sec/$idx.seeds"
+
+  # A shape neither program reads is still possible — an indented `seeds:` line,
+  # a `*` bullet — and a section that runs without the sources you named looks
+  # exactly like one you gave none. It is a warning rather than a stop because the
+  # section is still researchable; it is not silence because you cannot see this
+  # from the briefing.
+  if grep -qE '^[[:space:]]*seeds:' "$body" && ! grep -q '[^[:space:]]' "$WORK/sec/$idx.seeds"; then
+    warn "scout brief: the section '$heading' in $PROFILE carries a seeds: line but no seed URL was read from it, so it runs with none. A seeds block is a 'seeds:' line at the left margin followed by items beginning with '- '."
+  fi
 
   slug="$(slugify "$heading")"
   [ -n "$slug" ] || slug="section-$idx"
@@ -264,7 +320,12 @@ say "scout brief — $P_NAME"
 say "  profile:     $PROFILE"
 say "  run anchor:  $ANCHOR"
 say "  sections:    $SEC_COUNT"
-say "  worst case:  $SEC_COUNT x $P_PAGES = $((SEC_COUNT * P_PAGES)) pages, $SEC_COUNT x $P_MINUTES = $((SEC_COUNT * P_MINUTES)) minutes of research, plus the merge"
+# The minutes half states the ceiling the watchdog actually enforces, which is
+# LIMIT_SECONDS per dispatch and one dispatch more than there are sections. The
+# banner is the only place the worst case is put in front of the operator before
+# the run starts, so it may not name a number the run routinely exceeds.
+if [ "$SEC_COUNT" -eq 1 ]; then SEC_WORD="section"; else SEC_WORD="sections"; fi
+say "  worst case:  $SEC_COUNT x $P_PAGES = $((SEC_COUNT * P_PAGES)) pages; $((SEC_COUNT + 1)) x ($P_MINUTES + 5 grace) = $(( (SEC_COUNT + 1) * (P_MINUTES + 5) )) minutes ($SEC_COUNT $SEC_WORD + the merge)"
 say "  model:       inherited from this environment. scout pins none, so the bill follows how this launcher was started."
 if [ -n "${SCOUT_BRIEF_MAX_USD:-}" ]; then
   say "  cost:        bounded by SCOUT_BRIEF_MAX_USD=$SCOUT_BRIEF_MAX_USD per invocation. $((SEC_COUNT + 1)) invocations ($SEC_COUNT sections + 1 merge) x \$$SCOUT_BRIEF_MAX_USD x 1.25 measured overshoot = about \$$(LC_ALL=C awk -v n="$SEC_COUNT" -v c="$SCOUT_BRIEF_MAX_USD" 'BEGIN { printf "%.2f", (n + 1) * c * 1.25 }') worst case."
@@ -295,7 +356,7 @@ mkdir -p scout-workbench/research scout-workbench/briefings scout-workbench/ledg
 # its own code; the watchdog firing yields 143.
 dispatch() {
   local agent="$1" prompt="$2" out="$3" err="$4" limit="$5"
-  local rc cpid wpid
+  local rc cpid wpid fired
   local -a cmd
 
   cmd=(claude --print --output-format json --plugin-dir "$SCOUT_DIR" --agent "$agent" --permission-mode auto)
@@ -304,8 +365,25 @@ dispatch() {
   fi
   cmd=("${cmd[@]}" "$prompt")
 
+  # The watchdog's record that it fired, written before it signals anything.
+  # `wait` reports 143 for a SIGTERM and 137 for the SIGKILL that follows it, and
+  # a timeout has to read as a timeout either way, because outcome_of tells one
+  # from a failure by the value 143 alone. The file says who ended the child. It
+  # never says whether the child did any work: that stays the exit code's job, and
+  # a child that finished on its own keeps the code it chose.
+  fired="$out.watchdog-fired"
+  rm -f "$fired"
+
+  # Job control for this one command, so the child leads its own process group and
+  # the watchdog can signal the group rather than one pid. Without it the child's
+  # own descendants — under `depth: on` a headless browser and its MCP servers —
+  # outlive the cap that exists to bound them and keep fetching and spending while
+  # the next section runs.
+  set -m
   "${cmd[@]}" < /dev/null > "$out" 2> "$err" &
   cpid=$!
+  set +m
+
   # The watchdog polls rather than sleeping the whole limit in one go, and its
   # own output goes nowhere. Both matter: a single long `sleep` survives the kill
   # below as an orphan and keeps holding this script's stdout, which hangs any
@@ -318,13 +396,38 @@ dispatch() {
       sleep 1
       kill -0 "$cpid" 2>/dev/null || exit 0
     done
-    kill -TERM "$cpid" 2>/dev/null || true ) > /dev/null 2>&1 &
+    : > "$fired"
+    # The group first, the bare pid as the fallback for a child that never got a
+    # group of its own. SIGTERM lets the agent stop and write what it has; the
+    # SIGKILL ten seconds later is what bounds a child that ignores SIGTERM.
+    # Without the escalation `wait` below has no bound at all, and a cron job that
+    # hangs forever is worse than one that fails.
+    kill -TERM -"$cpid" 2>/dev/null || kill -TERM "$cpid" 2>/dev/null || true
+    grace=0
+    while [ "$grace" -lt 10 ]; do
+      sleep 1
+      kill -0 "$cpid" 2>/dev/null || exit 0
+      grace=$((grace + 1))
+    done
+    kill -KILL -"$cpid" 2>/dev/null || kill -KILL "$cpid" 2>/dev/null || true ) > /dev/null 2>&1 &
   wpid=$!
 
   rc=0
-  wait "$cpid" || rc=$?
+  # The redirection is on the builtin, not on the child: bash announces a job that
+  # died by signal ("… Terminated: 15", "… Killed: 9") on the shell's stderr as it
+  # reaps it, and under cron that line is mailed to the operator on every timeout
+  # the design intends, reading as a fault in this script. Redirecting `wait`
+  # itself suppresses the announcement and still yields the child's status
+  # (measured on bash 3.2.57; `set -m` does not suppress it).
+  { wait "$cpid"; } 2>/dev/null || rc=$?
   kill -TERM "$wpid" 2>/dev/null || true
   wait "$wpid" 2>/dev/null || true
+  # A child that beat the watchdog to the finish by a second keeps its own code:
+  # the flag only renames a non-zero death the watchdog caused.
+  if [ "$rc" -ne 0 ] && [ -f "$fired" ]; then
+    rc=143
+  fi
+  rm -f "$fired"
   return "$rc"
 }
 
@@ -466,6 +569,9 @@ say ""
 
 say "merging $SEC_COUNT section(s) into $BRIEFING_REL"
 
+# From here on a briefing has been attempted, so an abort is a 1 and not a 2.
+STAGE=1
+
 merge_rc=0
 dispatch scout:briefer "$(cat "$WORK/merge.prompt")" "$WORK/merge.stdout" "$WORK/merge.stderr" "$LIMIT_SECONDS" || merge_rc=$?
 
@@ -475,6 +581,7 @@ if [ "$merge_rc" -ne 0 ] && [ -s "$WORK/merge.stderr" ]; then
 fi
 
 # --- 8. The exit code ---------------------------------------------------------
+FINISHED=1
 if [ "$merge_rc" -eq 0 ] && [ -s "$BRIEFING_REL" ]; then
   say "briefing written: $ANCHOR/$BRIEFING_REL"
   exit 0
