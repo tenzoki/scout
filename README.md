@@ -176,6 +176,132 @@ A plugin cannot ship a permission rule that binds its agent's own `Bash` calls �
 
 With this in place, `date` and `mkdir` run without a prompt and any other shell command falls outside the allowlist, so Claude Code prompts you before running it. Without the snippet scout still only *calls* `date` and `mkdir`, but Claude Code may prompt you to approve a broader `Bash` permission — approving that grants more than scout uses, so the allowlist is the way to keep its shell access scoped. `/scout:setup` walks through the same recommendation.
 
+## Continuous briefings (`scout brief`)
+
+A briefing is a standing version of a scout run. You write an interest profile once — a short markdown file with one heading per topic you want followed — and `scout brief` runs one research process per section, merges the results into a single document with the highlights on top, and remembers what it already told you so tomorrow's briefing carries only what is new.
+
+**What it is not:** nothing in scout watches the clock and nothing delivers the briefing anywhere. `scout brief` runs when something starts it, and what it produces is a file on your disk. Scheduling is your cron job (see below); reading it is you opening the file. There is no daemon, no mail, no push.
+
+### Write a profile
+
+Copy the shipped example and edit it:
+
+```bash
+mkdir -p ~/briefings && cp ~/.scout/briefing/example-profile.md ~/briefings/ai-morning.md
+```
+
+`briefing/example-profile.md` is both the worked example and the format reference — the explanation lives inside the file, as prose the run ignores. Change the title, change `name`, then rewrite the `##` headings and the question under each. That is the whole edit.
+
+Two things decide whether a briefing is worth reading:
+
+- **`name` and `language` are required.** `name` (lowercase letters, digits, hyphens) names your ledger and your briefing files. A run that finds either field missing stops and says so.
+- **Each section has to be a complete research question.** The run is unattended, so the agent cannot ask you what you meant — every term you leave open is one it resolves for itself. Say what counts as an item, what is out of scope, what each item must state, and where a judgement boundary sits as a number ("at or below 15 billion parameters", not "small models"). The three sections in the example are written to that standard.
+
+### Run it
+
+```bash
+scout brief ~/briefings/ai-morning.md
+```
+
+**The profile's own directory is the run anchor.** Everything is written beside the profile, whatever directory you started from:
+
+```
+~/briefings/scout-workbench/research/    one cited report per section
+~/briefings/scout-workbench/briefings/   YYYY-MM-DD-<name>.md   ← what you read
+~/briefings/scout-workbench/ledgers/     <name>.md              ← what it remembers
+```
+
+The briefing carries the highlights, then every profile section in the profile's own order, then a run-figures table and any failure notes. Each item carries its sources and a confidence marker, exactly as a normal scout report does.
+
+**A briefing file is written on every run**, including the morning where nothing survived the story test. That briefing says "Nothing new this morning" and still carries every section heading and the run figures. This is deliberate: a missing file is indistinguishable from a failed run, so silence is never the output.
+
+### Schedule it yourself
+
+Use your own cron. One line, 06:30 daily:
+
+```
+30 6 * * * $HOME/.local/bin/scout brief $HOME/briefings/ai-morning.md >> $HOME/briefings/scout-brief.log 2>&1
+```
+
+Two things this line gets right and a hand-written one usually does not. **The launcher is named by its full path**, because cron's `PATH` is a short default that does not contain `~/.local/bin` — a bare `scout` in a crontab fails with "command not found". And output is redirected to a log, because a run whose reasons you cannot read is a run you cannot tune. (If you installed with `SCOUT_BIN` set, use that directory instead. `scout --where` prints the install location.)
+
+**Your machine has to be awake at that time.** cron does not wake a sleeping laptop and does not catch up on a schedule it slept through; a closed lid at 06:30 means no briefing that day. On macOS, `pmset` scheduled wake or a `launchd` job with `StartCalendarInterval` handles that better than cron does.
+
+### What a briefing costs
+
+**scout pins no model.** There is no `model:` field in the profile and no `--model` flag on the command. The run inherits whatever model the environment that starts the launcher supplies, which means *you choose the model by choosing how cron starts scout* — and the bill follows that choice. It also changes silently when you change your own default model, with nothing in the profile to tell you it did.
+
+The only cost measurement that exists is **about $0.27 for one small research question answered from two sources.** Read that as a **floor for one section, not an estimate for a morning.** A briefing section carries a crawl of up to 40 pages, so the real figure is higher by an amount nobody here has measured. Multiplying $0.27 by your section count would be invention, and this documentation will not do it for you.
+
+To put a hard bound on it, set `SCOUT_BRIEF_MAX_USD` on the cron line:
+
+```
+30 6 * * * SCOUT_BRIEF_MAX_USD=1.50 $HOME/.local/bin/scout brief $HOME/briefings/ai-morning.md >> $HOME/briefings/scout-brief.log 2>&1
+```
+
+- It is **optional and has no default**. A dollar cap is only interpretable against a model, and scout pins none.
+- It applies **per invocation** — to each section and to the merge — so a three-section profile can spend up to four times the number you set.
+- It **overshoots by 10 to 22 per cent** (measured), because the cap is checked between turns rather than before each API call. Set it at roughly 80 per cent of the ceiling you actually mean.
+- When it fires, **that section's entire report is lost.** The wall-clock cap is gentler: a section that runs out of minutes stops and writes what it has.
+
+The run prints its own worst case as a banner before it starts, so the arithmetic is in front of you rather than in your head.
+
+### The caps are per section, not per morning
+
+| Field | Starting value | What it bounds |
+|---|---|---|
+| `yield-target` | 8 | New items a section aims for; reaching it ends that section early |
+| `max-pages` | 40 | Pages one section may fetch |
+| `max-hops` | 2 | How far the agent may follow links from a page it already holds (0 = seeds and search results only) |
+| `max-minutes` | 15 | Wall clock for one section (the watchdog allows 5 minutes' grace on top) |
+| `depth` | `off` | Whether the browser-driven depth layer may be used |
+| `ledger-window-days` | 60 | How far back the "have I already reported this?" test looks |
+
+**The worst case for a morning is sections × cap.** Three sections at `max-pages` 40 can fetch 120 pages; three at `max-minutes` 15 can run for 80 minutes, because the watchdog allows five minutes of grace per dispatch and the merge gets a dispatch of its own (4 × 20).
+
+**These starting values are proposals with no measurement behind them, and they are expected to be tuned.** They are not defaults anyone has validated against real mornings. Run a few, read the run-figures table, and change them.
+
+### Read and correct the ledger
+
+Every item a briefing publishes is appended to `scout-workbench/ledgers/<name>.md` as one entry: a sentence saying who did what, plus its sources, its section, and what the story test decided. `briefing/example-ledger.md` is a worked instance with the fields explained inside it.
+
+The file is meant to be opened and edited by hand. **Deleting an entry makes its story eligible again** — nothing else indexes the ledger and nothing is derived from it, so removing the entry is the whole of the operation.
+
+That matters more than it sounds: **correcting the ledger is the only remedy for a story that was wrongly suppressed.** A suppressed story leaves no trace in the briefing, so if you suspect the morning was too quiet, the ledger is the only place to look and the only place to fix it.
+
+**What the window does.** `ledger-window-days` decides how far back the test reads. A story first reported longer ago than the window can be reported a second time, because the entry that would have caught it is no longer consulted. That is the safe direction to fail in: a window too short produces a **duplicate you can see and skip**, while the alternative would be an omission you never learn about. Widening the window costs only the size of the set the story test reads, so set it to the cadence of your topic — model releases turn over in weeks, regulatory processes in months.
+
+### Exit codes (so a cron wrapper can act on them)
+
+The launcher hands the orchestrator's exit code straight through to whatever started it:
+
+| Code | Meaning | What a wrapper should do |
+|---|---|---|
+| `0` | A briefing was written | Nothing. Read the file. |
+| `1` | The run reached the merge and no usable briefing came out of it | Alert. The log holds the merge's error output. |
+| `2` | The run stopped before a briefing was possible — a bad argument, an unusable profile, a missing script | Fix the invocation or the profile; retrying unchanged will fail the same way. |
+| `3` | Windows only: `scout brief` refused (see below) | Run it under WSL or Git Bash instead. |
+
+Per-section outcomes never change the exit code. A run whose every section failed still merges, still writes a briefing and **still exits 0** — the per-section verdicts (`succeeded`, `timed out`, `failed`, `failed — exceeded its budget`) are in the briefing's run-figures table and failure notes, and a wrapper that wants to act on them reads the file.
+
+### Windows
+
+The briefing assets install normally: `%USERPROFILE%\.scout\briefing\` contains the scripts and the examples after any install or update. But **`scout brief` on Windows refuses and exits 3.** The orchestrator is a bash script and no PowerShell counterpart ships in this release; exit 3 sits deliberately outside the 0/1/2 contract above, so a scheduled task can never read the refusal as a real briefing outcome.
+
+To produce a briefing on a Windows machine, run the script directly under WSL or Git Bash, pointing at the installed copy:
+
+```bash
+# Git Bash (~ is %USERPROFILE%)
+bash ~/.scout/briefing/scout-brief.sh /path/to/profile.md
+
+# WSL (your Windows home is under /mnt/c)
+bash /mnt/c/Users/<you>/.scout/briefing/scout-brief.sh /path/to/profile.md
+```
+
+Both need the `claude` CLI available inside that shell, since the script dispatches through it. `scout --where` prints the install directory if you moved it.
+
+Every other scout command works normally on Windows.
+
 ## Optional depth layer (browser-use)
 
 The depth layer lets scout drive a **real local Chromium browser** for pages the breadth layer cannot reach over plain HTTP: JavaScript-rendered content, owned-account logins, interactive interfaces. It is the [browser-use](https://github.com/browser-use/browser-use) stack, run locally and exposed to scout as an MCP server.
