@@ -91,9 +91,12 @@ Check your internet connection and that the ref exists.
   New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 
   # Copy only the plugin assets — never any dev cruft.
-  # Asset list MUST match install.sh:68 exactly:
-  #   .claude-plugin agents skills services stilwerk README.md LICENSE
-  foreach ($item in @('.claude-plugin', 'agents', 'skills', 'services', 'stilwerk', 'README.md', 'LICENSE')) {
+  # This list MUST match the one in install.sh: its `for item in ...` loop, the
+  # one under install.sh's own "Copy only the plugin assets" comment. Cited by
+  # that anchor and not by line number, because a line number here goes stale
+  # the moment anything is inserted above it in the other file.
+  # Adding a top-level plugin directory means adding it to BOTH lists.
+  foreach ($item in @('.claude-plugin', 'agents', 'briefing', 'skills', 'services', 'stilwerk', 'README.md', 'LICENSE')) {
     $srcItem = Join-Path $Src $item
     if (Test-Path $srcItem) {
       Copy-Item -Recurse -Force -Path $srcItem -Destination $InstallDir
@@ -108,9 +111,13 @@ Check your internet connection and that the ref exists.
   if (-not (Test-Path $BinDir)) { New-Item -ItemType Directory -Path $BinDir -Force | Out-Null }
 
   # scout.cmd launcher body. Mirrors install.sh's bash launcher arms
-  # (--update/--uninstall/--where/meta + default dispatch). The `meta` arm
+  # (--update/--uninstall/--where/brief/meta + default dispatch). The `meta` arm
   # delegates to scout-meta.ps1 (written below) then falls through to launch
-  # scout — same "start container, then launch scout" flow as install.sh:95-126.
+  # scout — same "start container, then launch scout" flow as the bash `meta)`
+  # arm. The `brief` arm does NOT mirror its bash counterpart: briefing runs are
+  # Unix-only in this release, so it states that and stops. It still has to
+  # exist, because an unhandled first argument falls through to the default
+  # dispatch below and would be handed to the research agent as a question.
   $launcherBody = @"
 @echo off
 setlocal
@@ -119,6 +126,22 @@ set "SCOUT_BIN=$BinDir"
 if /i "%~1"=="--update"    ( powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/$Repo/main/install.ps1 | iex" & exit /b )
 if /i "%~1"=="--uninstall" ( del /q "%SCOUT_BIN%\scout-meta.ps1" 2>nul & rmdir /s /q "%SCOUT_DIR%" & echo scout removed. & (goto) 2>nul & del /q "%~f0" )
 if /i "%~1"=="--where"     ( echo %SCOUT_DIR% & exit /b 0 )
+if /i "%~1"=="brief" (
+  rem Briefing runs are Unix-only in this release. This arm exists so `brief`
+  rem never reaches the default dispatch at the bottom of this file, which
+  rem would hand the word and the profile path to the research agent as a
+  rem question and answer it with a research run.
+  rem Exit code 3 is deliberately outside the orchestrator's three-valued
+  rem contract - 0 briefing written, 1 merge produced none, 2 stopped before a
+  rem briefing was possible - so a wrapper or scheduled task can never read
+  rem this refusal as one of those outcomes.
+  echo scout brief: briefing runs are not supported on Windows in this release.
+  echo The briefing scripts are installed with scout, under:
+  echo   %SCOUT_DIR%\briefing
+  echo Run scout-brief.sh from there under WSL or Git Bash to produce a briefing.
+  echo Every other scout command works normally on Windows.
+  exit /b 3
+)
 if /i "%~1"=="meta" (
   rem Opt-in metasearch backend: best-effort start the local SearXNG container,
   rem then launch scout with the `meta` token dropped. The helper never
