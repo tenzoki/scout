@@ -73,7 +73,7 @@ say "Installing to $INSTALL_DIR ..."
 rm -rf "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
 # Copy only the plugin assets — never any dev cruft.
-for item in .claude-plugin agents skills services stilwerk README.md LICENSE; do
+for item in .claude-plugin agents briefing skills services stilwerk README.md LICENSE; do
   [ -e "$SRC/$item" ] && cp -R "$SRC/$item" "$INSTALL_DIR/"
 done
 [ -f "$INSTALL_DIR/.claude-plugin/plugin.json" ] || die "Install copy failed."
@@ -152,6 +152,17 @@ case "\${1:-}" in
   --where)
     echo "\$SCOUT_DIR"
     exit 0
+    ;;
+  brief)
+    # Unattended briefing run. exec, not a call: the orchestrator replaces this
+    # launcher process, so its three-valued exit code (0 briefing written,
+    # 1 merge produced none, 2 stopped before a briefing was possible) reaches
+    # cron unchanged rather than through a wrapper that could remap it. The
+    # orchestrator resolves the profile path and anchors the run in the profile's
+    # own directory, so nothing is resolved here. SCOUT_BRIEF_MAX_USD and the
+    # rest of the environment pass through untouched.
+    shift
+    exec bash "\$SCOUT_DIR/briefing/scout-brief.sh" "\$@"
     ;;
   meta)
     # Opt-in metasearch backend: start the local SearXNG container, then fall
