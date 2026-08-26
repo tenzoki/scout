@@ -26,14 +26,31 @@
 # carries the failure notes, and a caller that wants to act on them reads it.
 #
 # Optional environment:
-#   SCOUT_BRIEF_MAX_USD  per-invocation cost cap, passed as --max-budget-usd to
+#   SCOUT_BRIEF_MAX_USD  per-invocation usage cap, passed as --max-budget-usd to
 #                        each section and to the merge. There is deliberately no
-#                        default: a dollar cap is interpretable only against a
-#                        model, and scout pins none. The cap is checked between
-#                        turns rather than before the API call, so actual spend
-#                        overshoots it by 10 to 22 per cent (measured). When it
-#                        fires, the section's whole report is lost — unlike the
-#                        wall-clock cap, which lets the agent stop and write.
+#                        default: the number is interpretable only against a
+#                        model, and scout pins none.
+#
+#                        What it caps is token usage priced at the published
+#                        list rate and computed locally — every result object
+#                        this script reads carries costBasis: "list". On a
+#                        claude.ai subscription install no money is billed at
+#                        all and a run spends the plan's rolling usage windows
+#                        instead; on an API-key install the same figure is the
+#                        bill. The flag enforces in both cases, so it is a usage
+#                        cap wearing a currency sign rather than a cost bound.
+#
+#                        The cap is checked between turns rather than before the
+#                        API call, so an invocation overshoots it by up to one
+#                        whole turn. That floor is an absolute amount, not a
+#                        fraction of the cap: at $0.25 the measured overshoot
+#                        was 10 per cent, at $0.02 it was 854 per cent — $0.02
+#                        asked, $0.19089 spent, in one turn. One turn on a large
+#                        model with scout's system prompt measures about $0.19
+#                        (BRIEF_ONE_TURN_USD below), so a cap of that order or
+#                        under bounds almost nothing. When it fires, the
+#                        section's whole report is lost — unlike the wall-clock
+#                        cap, which lets the agent stop and write.
 #
 # Targets bash 3.2, which is what stock macOS ships.
 
@@ -316,6 +333,16 @@ BRIEFING_REL="scout-workbench/briefings/$TODAY-$P_NAME.md"
 LIMIT_SECONDS=$(( (P_MINUTES + 5) * 60 ))
 
 # --- 5. The run banner --------------------------------------------------------
+# One turn's usage, in the same list-priced dollars --max-budget-usd counts.
+# Measured in the S-2 spike: a $0.02 cap came back having spent $0.19089 in a
+# single turn, on a large model with scout's ~18k-token cached system prompt.
+# It is the floor on how far a cap can be overshot, because the cap is checked
+# between turns. It is model-dependent — a smaller model makes the banner's
+# worst case an over-estimate, which is the safe direction — so the banner names
+# it as a measurement rather than printing a bare total, and a model change
+# falsifies the figure rather than the rule above it.
+BRIEF_ONE_TURN_USD=0.19
+
 say "scout brief — $P_NAME"
 say "  profile:     $PROFILE"
 say "  run anchor:  $ANCHOR"
@@ -326,13 +353,27 @@ say "  sections:    $SEC_COUNT"
 # the run starts, so it may not name a number the run routinely exceeds.
 if [ "$SEC_COUNT" -eq 1 ]; then SEC_WORD="section"; else SEC_WORD="sections"; fi
 say "  worst case:  $SEC_COUNT x $P_PAGES = $((SEC_COUNT * P_PAGES)) pages; $((SEC_COUNT + 1)) x ($P_MINUTES + 5 grace) = $(( (SEC_COUNT + 1) * (P_MINUTES + 5) )) minutes ($SEC_COUNT $SEC_WORD + the merge)"
-say "  model:       inherited from this environment. scout pins none, so the bill follows how this launcher was started."
+say "  model:       inherited from this environment. scout pins none, so how this launcher was started is what decides a run's usage."
+# The usage half of the banner. Two things it may not do. It may not call the
+# figure a cost: under the subscription auth most installs have, every result
+# object carries costBasis "list" and nothing is billed in money, so the number
+# is a locally computed list-price valuation of tokens. And it may not express
+# the cap's overshoot as a percentage: the cap is checked between turns, so the
+# floor on overshoot is one whole turn — an absolute amount that dominates any
+# small cap. A $0.02 cap was measured spending $0.19089, 854 per cent, in one
+# turn; the 1.25 multiplier this line used to carry was right only for caps well
+# above one turn's cost.
 if [ -n "${SCOUT_BRIEF_MAX_USD:-}" ]; then
-  say "  cost:        bounded by SCOUT_BRIEF_MAX_USD=$SCOUT_BRIEF_MAX_USD per invocation. $((SEC_COUNT + 1)) invocations ($SEC_COUNT sections + 1 merge) x \$$SCOUT_BRIEF_MAX_USD x 1.25 measured overshoot = about \$$(LC_ALL=C awk -v n="$SEC_COUNT" -v c="$SCOUT_BRIEF_MAX_USD" 'BEGIN { printf "%.2f", (n + 1) * c * 1.25 }') worst case."
+  say "  usage:       SCOUT_BRIEF_MAX_USD=\$$SCOUT_BRIEF_MAX_USD caps each of $((SEC_COUNT + 1)) invocations ($SEC_COUNT $SEC_WORD + the merge)."
+  say "               The cap is checked between turns, so each invocation may overshoot it by up to one whole turn — measured at about \$$BRIEF_ONE_TURN_USD on a large model with scout's prompt. Worst case is therefore about \$$(LC_ALL=C awk -v n="$SEC_COUNT" -v c="$SCOUT_BRIEF_MAX_USD" -v t="$BRIEF_ONE_TURN_USD" 'BEGIN { printf "%.2f", (n + 1) * (c + t) }'), not $((SEC_COUNT + 1)) x \$$SCOUT_BRIEF_MAX_USD."
+  if LC_ALL=C awk -v c="$SCOUT_BRIEF_MAX_USD" -v t="$BRIEF_ONE_TURN_USD" 'BEGIN { exit !(c <= t) }'; then
+    say "               That cap is at or below one turn, so it cannot stop an invocation until the turn that breaches it has already been spent. It bounds a runaway, not this run."
+  fi
 else
-  say "  cost:        unbounded — no cap is set. Export SCOUT_BRIEF_MAX_USD to set one."
+  say "  usage:       unbounded — no cap is set. Export SCOUT_BRIEF_MAX_USD to set one."
   say "               The only measurement that exists is about \$0.27 for one small question answered from two sources. That is a floor per section, not an estimate: a section here carries a $P_PAGES-page crawl."
 fi
+say "               These \$ figures are token usage priced at list rate, computed locally — not necessarily money. On a claude.ai subscription install nothing is billed and a run spends the plan's rolling usage windows; on an API-key install the same figure is the bill."
 say ""
 
 mkdir -p scout-workbench/research scout-workbench/briefings scout-workbench/ledgers
@@ -431,21 +472,121 @@ dispatch() {
   return "$rc"
 }
 
-# A section's outcome is its exit code and nothing else. The spike recorded a run
-# that exited 1 with three research tool calls denied and still wrote a complete
-# report, so a file on disk is a property the failing case has too. File
+# The string value of a top-level JSON key in a --output-format json result
+# object, with the usual escapes flattened enough to be substring-matched.
+# Prints nothing when the key is absent or its value is not a string.
+#
+# This exists rather than a grep over the whole file because the strings that
+# identify a rate limit include "401" and "529", and those three digits occur in
+# duration_ms, in num_turns, in a session id and in a cost figure. A whole-file
+# grep would call a perfectly healthy run rate-limited. There is no jq on a
+# stock macOS, so the extraction is done here.
+json_string_field() {
+  LC_ALL=C awk -v key="$1" '
+    { buf = buf $0 "\n" }
+    END {
+      k = "\"" key "\""
+      L = length(buf)
+      # The first "result" in a result object is the *value* of "type", so an
+      # occurrence only counts as the key when a colon follows it.
+      pos = 1
+      while (1) {
+        n = index(substr(buf, pos), k)
+        if (n == 0) exit 0
+        n = pos + n - 1
+        i = n + length(k)
+        while (i <= L && substr(buf, i, 1) ~ /[ \t\r\n]/) i++
+        if (substr(buf, i, 1) == ":") break
+        pos = n + 1
+      }
+      i++
+      while (i <= L && substr(buf, i, 1) ~ /[ \t\r\n]/) i++
+      # A non-string value (null, a number, an object) is not an answer here.
+      if (substr(buf, i, 1) != "\"") exit 0
+      i++
+      out = ""
+      while (i <= L) {
+        c = substr(buf, i, 1)
+        if (c == "\\") {
+          e = substr(buf, i + 1, 1)
+          # \n \t \r become a space so a multi-line message stays one line and
+          # two words never fuse into a third; \" \\ \/ keep their character.
+          if (e == "n" || e == "t" || e == "r") out = out " "
+          else if (e == "u") { out = out " "; i += 4 }
+          else out = out e
+          i += 2
+          continue
+        }
+        if (c == "\"") break
+        out = out c
+        i++
+      }
+      print out
+    }
+  ' "$2" 2>/dev/null || true
+}
+
+# A section's outcome is its exit code first, and the result object only where
+# the exit code cannot tell two very different failures apart. The spike recorded
+# a run that exited 1 with three research tool calls denied and still wrote a
+# complete report, so a file on disk is a property the failing case has too. File
 # existence is never consulted here.
+#
+# Why the JSON is read at all: a host that cannot log in and a host that has hit
+# its usage limit both exit non-zero and both used to render as a bare "failed",
+# which is also what a quiet news day renders as. The operator could not tell a
+# broken host from an empty web. Measured sample from the S-2 spike, an
+# unauthenticated dispatch:
+#
+#   {"is_error": true, "subtype": "success", "terminal_reason": "api_error",
+#    "api_error_status": null, "result": "Not logged in · Please run /login"}
+#
+# Two consequences. subtype reads "success" on that run, so it is never keyed on
+# here. And the diagnosis is prose in result, so a substring test on that prose
+# is the only instrument available — there is no rate-limit subtype to key on the
+# way budget_exhausted can be.
+#
+# What is measured and what is not: terminal_reason "api_error" carrying the real
+# diagnosis in result is observed. The specific phrases below are read out of the
+# shipped binary's own health classifier, not provoked — forcing a 429 spends a
+# real share of the user's usage window. That is why an api_error whose prose
+# matches nothing known falls through to plain "failed" rather than to a guess:
+# where the evidence is second-hand the code degrades to what it said before,
+# and a phrase list that turns out to be wrong costs a label, never a wrong one.
 outcome_of() {
-  local rc="$1" out="$2"
+  local rc="$1" out="$2" reason result
   if [ "$rc" -eq 0 ]; then
     printf 'succeeded\n'
-  elif [ "$rc" -eq 143 ]; then
-    printf 'timed out\n'
-  elif [ -f "$out" ] && grep -q 'budget_exhausted' "$out"; then
-    printf 'failed — exceeded its budget\n'
-  else
-    printf 'failed\n'
+    return 0
   fi
+  if [ "$rc" -eq 143 ]; then
+    printf 'timed out\n'
+    return 0
+  fi
+  # Budget first, and still by the whole-file grep the spike verified against a
+  # real error_max_budget_usd object rather than by the extractor below.
+  if [ -f "$out" ] && grep -q 'budget_exhausted' "$out"; then
+    printf 'failed — exceeded its budget\n'
+    return 0
+  fi
+  if [ -f "$out" ]; then
+    reason="$(json_string_field terminal_reason "$out")"
+    if [ "$reason" = "api_error" ]; then
+      # Case-folded once, so the phrase list below does not have to carry a
+      # capitalised twin of every entry and cannot miss a third spelling.
+      result="$(json_string_field result "$out" | LC_ALL=C tr 'A-Z' 'a-z')"
+      case "$result" in
+        *"please run /login"* | *"not logged in"* | *"invalid api key"* | *401*)
+          printf 'failed — not authenticated\n'
+          return 0 ;;
+        *"rate limited"* | *"rate_limit"* | *"usage limit reached"* | \
+        *"credit balance too low"* | *overloaded* | *529*)
+          printf 'failed — rate limited or over the usage limit\n'
+          return 0 ;;
+      esac
+    fi
+  fi
+  printf 'failed\n'
 }
 
 # The newest report whose name ends -<slug>.md and whose modification time is at
@@ -538,6 +679,38 @@ while [ "$i" -lt "$SEC_COUNT" ]; do
 done
 
 say ""
+
+# --- 6b. When the sections did not fail at research ----------------------------
+# outcome_of now tells an unauthenticated or rate-limited section from one that
+# simply found nothing. This says it once for the whole run, on stderr, because
+# the per-section lines above scroll past and a wrapper's log keeps stderr.
+#
+# The exit code is deliberately NOT changed here. That per-section outcomes never
+# move it is a documented contract (see the top of this file), and a run whose
+# every section failed to authenticate still merges and still exits 0 — an empty
+# briefing with a success code. Changing that is a decision, not a fix, and it is
+# raised as one rather than taken here. What this block can do without touching
+# the contract is refuse to let the failure be silent.
+AUTH_FAILURES=0
+LIMIT_FAILURES=0
+i=0
+while [ "$i" -lt "$SEC_COUNT" ]; do
+  case "${SEC_OUTCOME[$i]}" in
+    'failed — not authenticated')  AUTH_FAILURES=$((AUTH_FAILURES + 1)) ;;
+    'failed — rate limited'*)      LIMIT_FAILURES=$((LIMIT_FAILURES + 1)) ;;
+  esac
+  i=$((i + 1))
+done
+
+if [ "$AUTH_FAILURES" -gt 0 ]; then
+  warn "scout brief: $AUTH_FAILURES of $SEC_COUNT $SEC_WORD could not authenticate. That is this host, not a quiet day: the briefing will be thin or empty for a reason that has nothing to do with the web. Run 'claude auth status' to see whether this machine is logged in."
+fi
+if [ "$LIMIT_FAILURES" -gt 0 ]; then
+  warn "scout brief: $LIMIT_FAILURES of $SEC_COUNT $SEC_WORD was refused for a rate or usage limit. Wait for the limit window to reset and run the profile again."
+fi
+if [ $((AUTH_FAILURES + LIMIT_FAILURES)) -gt 0 ]; then
+  warn "scout brief: the exit code does not reflect this — per-section outcomes never change it. Each section's outcome is in the briefing."
+fi
 
 # --- 7. The merge -------------------------------------------------------------
 # A failed section's report, where one exists, is passed with its outcome beside
