@@ -180,7 +180,7 @@ With this in place, `date` and `mkdir` run without a prompt and any other shell 
 
 A briefing is a standing version of a scout run. You write an interest profile once — a short markdown file with one heading per topic you want followed — and `scout brief` runs one research process per section, merges the results into a single document with the highlights on top, and remembers what it already told you so tomorrow's briefing carries only what is new.
 
-**What it is not:** nothing in scout watches the clock and nothing delivers the briefing anywhere. `scout brief` runs when something starts it, and what it produces is a file on your disk. Scheduling is your cron job (see below); reading it is you opening the file. There is no daemon, no mail, no push.
+**What it is not:** nothing in scout watches the clock and nothing delivers the briefing anywhere. `scout brief` runs when you run it, and what it produces is a file on your disk. There is no daemon, no mail, no push.
 
 ### Write a profile
 
@@ -203,6 +203,8 @@ Two things decide whether a briefing is worth reading:
 scout brief ~/briefings/ai-morning.md
 ```
 
+**Run it from your own terminal.** The run dispatches through the `claude` CLI and uses that shell's Claude Code login, so it has to happen somewhere you are signed in. An interactive terminal is; a context detached from your login session is not.
+
 **The profile's own directory is the run anchor.** Everything is written beside the profile, whatever directory you started from:
 
 ```
@@ -215,33 +217,23 @@ The briefing carries the highlights, then every profile section in the profile's
 
 **A briefing file is written on every run**, including the morning where nothing survived the story test. That briefing says "Nothing new this morning" and still carries every section heading and the run figures. This is deliberate: a missing file is indistinguishable from a failed run, so silence is never the output.
 
-### Schedule it yourself
+### What a briefing spends
 
-Use your own cron. One line, 06:30 daily:
+**Which resource you spend depends on how you are signed in.** On a claude.ai subscription nothing is billed: the dollar figure Claude Code reports is token usage priced at the published list rate and worked out locally, and what a run draws on is your subscription's rolling usage allowance. On an API-key install that same figure is money. Both are measured the same way, so everything below reads the same for both — as dollars on an API key, as list-priced usage on a subscription. Whether a subscription's usage windows are debited by that same list-price arithmetic is not something scout can see, and this documentation does not claim it either way.
 
-```
-30 6 * * * $HOME/.local/bin/scout brief $HOME/briefings/ai-morning.md >> $HOME/briefings/scout-brief.log 2>&1
-```
+**scout pins no model.** There is no `model:` field in the profile and no `--model` flag on the command. The run inherits whatever model the environment you start it from supplies, so you choose the model by choosing where you run. It also changes silently when you change your own default model, with nothing in the profile to tell you it did. The choice is worth making deliberately: the model is the largest single factor in what a run spends.
 
-Two things this line gets right and a hand-written one usually does not. **The launcher is named by its full path**, because cron's `PATH` is a short default that does not contain `~/.local/bin` — a bare `scout` in a crontab fails with "command not found". And output is redirected to a log, because a run whose reasons you cannot read is a run you cannot tune. (If you installed with `SCOUT_BIN` set, use that directory instead. `scout --where` prints the install location.)
+The only measurement that exists is **about $0.27 of list-priced usage for one small research question answered from two sources.** Read that as a **floor for one section, not an estimate for a whole profile.** A briefing section carries a crawl of up to 40 pages, so the real figure is higher by an amount nobody here has measured. Multiplying $0.27 by your section count would be invention, and this documentation will not do it for you.
 
-**Your machine has to be awake at that time.** cron does not wake a sleeping laptop and does not catch up on a schedule it slept through; a closed lid at 06:30 means no briefing that day. On macOS, `pmset` scheduled wake or a `launchd` job with `StartCalendarInterval` handles that better than cron does.
+To cap it, set `SCOUT_BRIEF_MAX_USD` on the command:
 
-### What a briefing costs
-
-**scout pins no model.** There is no `model:` field in the profile and no `--model` flag on the command. The run inherits whatever model the environment that starts the launcher supplies, which means *you choose the model by choosing how cron starts scout* — and the bill follows that choice. It also changes silently when you change your own default model, with nothing in the profile to tell you it did.
-
-The only cost measurement that exists is **about $0.27 for one small research question answered from two sources.** Read that as a **floor for one section, not an estimate for a morning.** A briefing section carries a crawl of up to 40 pages, so the real figure is higher by an amount nobody here has measured. Multiplying $0.27 by your section count would be invention, and this documentation will not do it for you.
-
-To put a hard bound on it, set `SCOUT_BRIEF_MAX_USD` on the cron line:
-
-```
-30 6 * * * SCOUT_BRIEF_MAX_USD=1.50 $HOME/.local/bin/scout brief $HOME/briefings/ai-morning.md >> $HOME/briefings/scout-brief.log 2>&1
+```bash
+SCOUT_BRIEF_MAX_USD=1.50 scout brief ~/briefings/ai-morning.md
 ```
 
-- It is **optional and has no default**. A dollar cap is only interpretable against a model, and scout pins none.
+- It is **optional and has no default**. A cap in dollars is only interpretable against a model, and scout pins none.
 - It applies **per invocation** — to each section and to the merge — so a three-section profile can spend up to four times the number you set.
-- It **overshoots by 10 to 22 per cent** (measured), because the cap is checked between turns rather than before each API call. Set it at roughly 80 per cent of the ceiling you actually mean.
+- **The overshoot is one whole turn, not a percentage.** The cap is checked between turns rather than before each API call, so a run stops at the first check *after* it has already gone over. Read the real ceiling as **your cap plus one turn**. One turn on a large model with scout's system prompt was measured at about $0.19, which is the whole of a small cap: a $0.02 cap ran to $0.19 before anything could stop it. Anything under roughly a dollar is dominated by that term, so treat a small cap as a hint rather than a limit.
 - When it fires, **that section's entire report is lost.** The wall-clock cap is gentler: a section that runs out of minutes stops and writes what it has.
 
 The run prints its own worst case as a banner before it starts, so the arithmetic is in front of you rather than in your head.
@@ -271,7 +263,7 @@ That matters more than it sounds: **correcting the ledger is the only remedy for
 
 **What the window does.** `ledger-window-days` decides how far back the test reads. A story first reported longer ago than the window can be reported a second time, because the entry that would have caught it is no longer consulted. That is the safe direction to fail in: a window too short produces a **duplicate you can see and skip**, while the alternative would be an omission you never learn about. Widening the window costs only the size of the set the story test reads, so set it to the cadence of your topic — model releases turn over in weeks, regulatory processes in months.
 
-### Exit codes (so a cron wrapper can act on them)
+### Exit codes (so a wrapper can act on them)
 
 The launcher hands the orchestrator's exit code straight through to whatever started it:
 
@@ -286,7 +278,7 @@ Per-section outcomes never change the exit code. A run whose every section faile
 
 ### Windows
 
-The briefing assets install normally: `%USERPROFILE%\.scout\briefing\` contains the scripts and the examples after any install or update. But **`scout brief` on Windows refuses and exits 3.** The orchestrator is a bash script and no PowerShell counterpart ships in this release; exit 3 sits deliberately outside the 0/1/2 contract above, so a scheduled task can never read the refusal as a real briefing outcome.
+The briefing assets install normally: `%USERPROFILE%\.scout\briefing\` contains the scripts and the examples after any install or update. But **`scout brief` on Windows refuses and exits 3.** The orchestrator is a bash script and no PowerShell counterpart ships in this release; exit 3 sits deliberately outside the 0/1/2 contract above, so a wrapper can never read the refusal as a real briefing outcome.
 
 To produce a briefing on a Windows machine, run the script directly under WSL or Git Bash, pointing at the installed copy:
 
