@@ -50,6 +50,17 @@
 
 set -euo pipefail
 
+# Every stage of this pipeline is pinned to the C locale, not just the sort.
+# awk's tolower(), [[:punct:]] and length() are locale-sensitive, and length()
+# is what decides the two- and four-character token minimums below; under a
+# UTF-8 locale gawk counts characters and under C it counts bytes, so an
+# unpinned run would tokenise a Chinese entry one way on Linux and another on
+# macOS. This script processes ASCII-structured markup and never sorts or
+# compares for a human reader, so C is the right collation throughout. Pinning
+# it once here also means the retriever does not inherit whatever locale cron
+# happened to hand it.
+export LC_ALL=C
+
 SELF="${0##*/}"
 
 usage() {
@@ -181,10 +192,44 @@ function jdn(s,   p, dp, y, m, d, a, yy, mm) {
 	return d + int((153 * mm + 2) / 5) + 365 * yy + int(yy / 4) - int(yy / 100) + int(yy / 400) - 32045
 }
 
+function utf8(cp) {
+	# A code point back to its UTF-8 bytes. Used only to build the fold table.
+	if (cp < 128) return sprintf("%c", cp)
+	if (cp < 2048) return sprintf("%c%c", 192 + int(cp / 64), 128 + cp % 64)
+	return sprintf("%c%c%c", 224 + int(cp / 4096), 128 + int(cp / 64) % 64, 128 + cp % 64)
+}
+
+function foldrange(lo, hi, delta,   cp) {
+	for (cp = lo; cp <= hi; cp++) { FOLDN++; FU[FOLDN] = utf8(cp); FL[FOLDN] = utf8(cp + delta) }
+}
+
+function foldcase(s,   t, i) {
+	# Lowercase, independent of the locale. The script is pinned to LC_ALL=C so
+	# that it tokenises identically everywhere, and in C `tolower()` folds ASCII
+	# and nothing else. Left at that, the lowercase entity name an agent passes
+	# — `roskomnadzor` spelled in Cyrillic, say — would fail to match the
+	# capitalised name that opens the sentence of the entry, which is exactly the
+	# path that has to carry an entry whose `entities:` line was deleted by hand.
+	# So the fold is done here from a table built once, rather than borrowed from
+	# whatever locale cron happened to hand us.
+	#
+	# Covered: Latin-1 Supplement, Greek and Cyrillic, the three cased alphabets
+	# beyond ASCII whose case pairs follow one rule. Latin Extended-A and beyond
+	# are not folded, because theirs do not. An unfolded token costs a match the
+	# judgement never sees, never a wrong one, and the entity path still reaches
+	# such an entry through its `entities:` line, which is written lowercase.
+	# Scripts without case — Chinese, Japanese, Korean, Hebrew, Arabic — are
+	# untouched here and matched as they stand.
+	t = tolower(s)
+	if (index(t, LEADLAT) == 0 && index(t, LEADGRK) == 0 && index(t, LEADCYR) == 0) return t
+	for (i = 1; i <= FOLDN; i++) if (index(t, FU[i])) gsub(FU[i], FL[i], t)
+	return t
+}
+
 function norm(s,   t) {
 	# Lowercase, punctuation to space, whitespace collapsed. Applied identically
 	# to both sides of every comparison, so the two stay commensurable.
-	t = tolower(s)
+	t = foldcase(s)
 	gsub(/[[:punct:]]/, " ", t)
 	gsub(/[ \t\r\n]+/, " ", t)
 	sub(/^ /, "", t)
@@ -206,11 +251,21 @@ function sentence_of(s,   t) {
 	# The sentence is the record. Strip the list marker, the bold date and any
 	# separator in front of it; what remains is what a reader would call the
 	# entry. Used only for tokenising — the block is printed verbatim.
+	#
+	# The separator strip must never be written as "everything that is not a
+	# Latin letter or digit": a byte-oriented awk reads that class as
+	# "every byte above 0x7F too", which deletes a whole Chinese, Japanese,
+	# Cyrillic, Greek, Hebrew or Arabic sentence and eats the first letter of a
+	# German one that opens on an umlaut. What is here instead is ASCII
+	# punctuation and space, which cannot be part of a multibyte character, plus
+	# the dashes matched as whole UTF-8 sequences. A non-Latin sentence therefore
+	# keeps every byte it arrived with, and the word path can still reach it when
+	# a hand-edit has removed its `entities:` line.
 	t = s
 	sub(/^-[ \t]*/, "", t)
 	sub(/^\*\*[^*]*\*\*/, "", t)
-	sub(/^[^0-9A-Za-z]*/, "", t)
-	sub(/^[0-9][0-9][0-9][0-9]-[0-9]+-[0-9]+[^0-9A-Za-z]*/, "", t)
+	sub(/^([[:punct:][:space:]]|—|–|―|−)*/, "", t)
+	sub(/^[0-9][0-9][0-9][0-9]-[0-9]+-[0-9]+([[:punct:][:space:]]|—|–|―|−)*/, "", t)
 	return t
 }
 
@@ -258,11 +313,23 @@ BEGIN {
 	SEP = sprintf("%c", 1)
 	TODAYJD = jdn(today)
 
+	# The fold table, built before the first norm() call. The three lead bytes
+	# are the only ones an uppercase letter in the covered ranges can start
+	# with, so a string holding none of them skips the fold entirely and an
+	# ASCII-only ledger pays nothing for this.
+	LEADLAT = sprintf("%c", 195); LEADGRK = sprintf("%c", 206); LEADCYR = sprintf("%c", 208)
+	foldrange(192, 214, 32)   # A-grave .. O-diaeresis
+	foldrange(216, 222, 32)   # O-slash .. Thorn
+	foldrange(913, 929, 32)   # Greek Alpha .. Rho
+	foldrange(931, 937, 32)   # Greek Sigma .. Omega
+	foldrange(1024, 1039, 80) # Cyrillic Ie-grave .. Dzhe
+	foldrange(1040, 1071, 32) # Cyrillic A .. Ya
+
 	# Function words and corporate suffixes. Dropping them keeps two entries from
 	# being joined by "with" or by "inc". The list is deliberately short: every
 	# word added to it can only remove a match, and recall is this stage.
 	stopwords = "the and for with that this from into over under after before their there they them been have will would could should than then when where which while about also more most other such some only said says according upon onto between during against among both each every ahead like just very much many"
-	suffixes = "inc incorporated corp corporation ltd limited llc gmbh mbh plc sa sas nv bv spa srl oyj kk"
+	suffixes = "inc incorporated corp corporation ltd limited llc gmbh mbh ag plc sa sas nv bv spa srl oyj kk"
 	n = split(stopwords " " suffixes, sw, " ")
 	for (i = 1; i <= n; i++) STOP[sw[i]] = 1
 
