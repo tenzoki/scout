@@ -249,7 +249,7 @@ The run prints its own worst case as a banner before it starts, so the arithmeti
 | `depth` | `off` | Whether the browser-driven depth layer may be used |
 | `ledger-window-days` | 60 | How far back the "have I already reported this?" test looks |
 
-**The worst case for a morning is sections × cap.** Three sections at `max-pages` 40 can fetch 120 pages; three at `max-minutes` 15 can run for 80 minutes, because the watchdog allows five minutes of grace per dispatch and the merge gets a dispatch of its own (4 × 20).
+**The two worst cases for a morning do not have the same shape.** Pages are sections × `max-pages`. Minutes are **(sections + 1) × (`max-minutes` + 5)**: the watchdog allows each dispatch five minutes of grace on top of the cap, and the merge is a dispatch like any other. The run banner fills both formulas in with your own numbers, which is the arithmetic to read rather than any worked out here.
 
 **These starting values are proposals with no measurement behind them, and they are expected to be tuned.** They are not defaults anyone has validated against real mornings. Run a few, read the run-figures table, and change them.
 

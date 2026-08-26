@@ -57,8 +57,8 @@ set -euo pipefail
 # unpinned run would tokenise a Chinese entry one way on Linux and another on
 # macOS. This script processes ASCII-structured markup and never sorts or
 # compares for a human reader, so C is the right collation throughout. Pinning
-# it once here also means the retriever does not inherit whatever locale cron
-# happened to hand it.
+# it once here also means the retriever does not inherit whatever locale its
+# caller happened to hand it.
 export LC_ALL=C
 
 SELF="${0##*/}"
@@ -211,7 +211,7 @@ function foldcase(s,   t, i) {
 	# capitalised name that opens the sentence of the entry, which is exactly the
 	# path that has to carry an entry whose `entities:` line was deleted by hand.
 	# So the fold is done here from a table built once, rather than borrowed from
-	# whatever locale cron happened to hand us.
+	# whatever locale the caller happened to hand us.
 	#
 	# Covered: Latin-1 Supplement, Greek and Cyrillic, the three cased alphabets
 	# beyond ASCII whose case pairs follow one rule. Latin Extended-A and beyond
