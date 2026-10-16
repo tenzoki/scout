@@ -17,8 +17,16 @@ Throughout, `<plugin>` is your scout plugin root:
 - installed copy: `~/.scout`
 - source tree: the `scout/` repo checkout
 
-So the shim path is
+So the source shim is
 `<plugin>/services/browser-use-anthropic/scout_browseruse_anthropic.py`.
+
+The registration does not name that file. `register-browser-use.sh` copies it to
+scout's state directory, `<state dir>` =
+`${SCOUT_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/scout}`, and registers
+the copy, so the **registered** shim path is
+`<state dir>/browser-use-anthropic/scout_browseruse_anthropic.py` (by default
+`~/.local/state/scout/browser-use-anthropic/scout_browseruse_anthropic.py`).
+A plugin update replaces `<plugin>`; it never touches `<state dir>`.
 
 ---
 
@@ -91,6 +99,10 @@ Confirm the `env` block carries both:
 - `ANONYMIZED_TELEMETRY=False`
 - `BROWSER_USE_VERSION_CHECK=false`
 
+Confirm also that the args name the registered shim copy,
+`<state dir>/browser-use-anthropic/scout_browseruse_anthropic.py`, and no path
+under `~/.claude/plugins/cache/` or inside `~/.scout`.
+
 These disable browser-use's PostHog telemetry ping and its version-check ping.
 Without them, the server phones home on startup.
 
@@ -102,7 +114,7 @@ All four hold:
 1. Direct shim launch starts the MCP server on stdio — no import-guard exit, no OpenAI-not-init error.
 2. `browser_extract_content` returns query-shaped text.
 3. The extraction hit Anthropic (console usage, or success with no OpenAI key set).
-4. Both no-cloud env vars present in `claude mcp get browser-use`.
+4. Both no-cloud env vars present in `claude mcp get browser-use`, and the args name the shim copy under `<state dir>`.
 
 Record the result (date, browser-use version, Claude Code version, pass/fail per
 step) in `fusion-workbench/history/` so the next bump has a baseline.

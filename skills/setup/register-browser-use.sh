@@ -37,22 +37,49 @@
 # selected with no key in the registering environment.
 #
 # This script never writes the key to a file and never echoes the full key.
+#
+# Shim location (state-dir rule): the registration is user-scope and outlives
+# every copy of the plugin, so it must not name a file inside one. The plugin
+# tree (~/.scout, or ~/.claude/plugins/cache/<marketplace>/scout/<version>/) is
+# replaced by an update. So this script copies the shim into one user-scoped
+# state directory, the same for every caller (launcher, /scout:setup, a
+# standalone run), and registers that copy:
+#   STATE_DIR = ${SCOUT_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/scout}
+#   shim copy = $STATE_DIR/browser-use-anthropic/scout_browseruse_anthropic.py
+# A STATE_DIR that is not absolute, or that lies under a plugin cache
+# (/plugins/cache/), is refused. Decision record:
+# 261016-2323-where-does-scout-keep-state-that-must-survive-a-plugin-update.md
+#
+# The copy is refreshed only when this script runs. A scout release that changes
+# the shim or the browser-use pin therefore needs /scout:setup re-run.
 
 set -u
 set -o pipefail
 
 PIN="browser-use[cli]@0.11.9"
 
-# Resolve the shim path from this script's own location, so it is correct in
-# both the installed ~/.scout tree and a direct source-tree run.
+# The source shim is resolved from this script's own location, so it is correct
+# in any plugin copy (launcher, marketplace cache, source tree). It is only ever
+# read; the registration names the copy in STATE_DIR (see header).
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SHIM_PATH="$(cd "$SCRIPT_DIR/../../" && pwd)/services/browser-use-anthropic/scout_browseruse_anthropic.py"
+SRC_SHIM="$(cd "$SCRIPT_DIR/../../" && pwd)/services/browser-use-anthropic/scout_browseruse_anthropic.py"
+
+STATE_DIR="${SCOUT_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/scout}"
+case "$STATE_DIR" in
+  /*) ;;
+  *) echo "Stopping: the scout state directory must be an absolute path, got '$STATE_DIR' (set SCOUT_STATE_DIR or XDG_STATE_HOME to an absolute path)." >&2; exit 1 ;;
+esac
+case "$STATE_DIR" in
+  */plugins/cache/*) echo "Stopping: the scout state directory '$STATE_DIR' lies inside a plugin cache, which a plugin update deletes. Point SCOUT_STATE_DIR somewhere outside it." >&2; exit 1 ;;
+esac
+SHIM_DIR="$STATE_DIR/browser-use-anthropic"
+SHIM_PATH="$SHIM_DIR/scout_browseruse_anthropic.py"
 
 echo "== prerequisites =="
 missing=0
 if command -v claude >/dev/null 2>&1; then echo "claude: ok"; else echo "claude: MISSING -> https://docs.claude.com/en/docs/claude-code"; missing=1; fi
 if command -v uvx >/dev/null 2>&1; then echo "uvx: ok"; else echo "uvx: MISSING -> install uv (ships uvx): https://github.com/astral-sh/uv"; missing=1; fi
-if [ ! -f "$SHIM_PATH" ]; then echo "shim: MISSING -> expected at $SHIM_PATH"; missing=1; else echo "shim: ok"; fi
+if [ ! -f "$SRC_SHIM" ]; then echo "shim: MISSING -> expected at $SRC_SHIM"; missing=1; else echo "shim: ok"; fi
 if [ "$missing" -ne 0 ]; then echo "Stopping: install the missing prerequisite, then re-run."; exit 1; fi
 
 # Decide key mode.
@@ -103,6 +130,13 @@ fi
 MODEL="${SCOUT_DEPTH_EXTRACT_MODEL:-}"
 
 echo
+echo "== copy shim to the state directory =="
+if ! mkdir -p "$SHIM_DIR"; then echo "Stopping: could not create $SHIM_DIR." >&2; exit 1; fi
+if ! cp "$SRC_SHIM" "$SHIM_PATH"; then echo "Stopping: could not copy the shim to $SHIM_PATH." >&2; exit 1; fi
+if ! cmp -s "$SRC_SHIM" "$SHIM_PATH"; then echo "Stopping: the shim copy at $SHIM_PATH does not match $SRC_SHIM." >&2; exit 1; fi
+echo "shim copy: $SHIM_PATH"
+
+echo
 echo "== register browser-use (user scope) =="
 # add/add-json refuse to overwrite an existing server, so remove first (scoped to
 # user so a project/local server you set up by hand is left untouched). The
@@ -142,6 +176,14 @@ fi
 
 echo
 echo "== verify =="
-claude mcp get browser-use 2>&1
+VERIFY_OUT="$(claude mcp get browser-use 2>&1)"
+printf '%s\n' "$VERIFY_OUT"
+case "$VERIFY_OUT" in
+  *"$SHIM_PATH"*) echo "shim path: ok ($SHIM_PATH)" ;;
+  *) echo "WARNING: the registered entry does not name the shim copy $SHIM_PATH." >&2 ;;
+esac
+case "$VERIFY_OUT" in
+  */plugins/cache/*) echo "WARNING: the registered entry names a path under /plugins/cache/, which the next plugin update deletes. Re-run /scout:setup." >&2 ;;
+esac
 echo
 echo "Done. If the entry shows Type: stdio, Command: uvx, the --from pin + shim path + --mcp args, SCOUT_DEPTH_PROVIDER=anthropic, and the two no-cloud env vars, depth is registered. Re-run scout."

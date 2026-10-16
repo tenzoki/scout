@@ -101,7 +101,16 @@ BROWSERUSE_ANTHROPIC_KEY="<the key the user supplied>" bash "${CLAUDE_PLUGIN_ROO
 
 Substitute the real key only in the actual command you run; never display the substituted command back to the user with the key in it. The script prints its own prerequisite, registration, and verification output.
 
-**Fallback — if the script cannot run in this environment** (e.g. the CLI registration forms fail in this Claude Code version): print the exact JSON `mcpServers` block below for the user to paste into their MCP settings by hand, and tell them plainly that you are falling back to the manual paste because the scripted registration was unavailable:
+The script copies the shim out of this plugin copy into scout's state directory, `${SCOUT_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/scout}`, and registers that copy. A plugin update replaces the plugin tree, so the registration must never name a file inside it. When a later scout release changes the shim or the browser-use pin, the user re-runs `/scout:setup` to refresh the copy.
+
+**Fallback — if the script cannot run in this environment** (e.g. the CLI registration forms fail in this Claude Code version): first create the shim copy with the two shell lines below, then print the exact JSON `mcpServers` block for the user to paste into their MCP settings by hand, and tell them plainly that you are falling back to the manual paste because the scripted registration was unavailable:
+
+```bash
+mkdir -p "${SCOUT_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/scout}/browser-use-anthropic"
+cp "${CLAUDE_PLUGIN_ROOT}"/services/browser-use-anthropic/scout_browseruse_anthropic.py "${SCOUT_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/scout}/browser-use-anthropic/"
+```
+
+In the JSON, replace `<state dir>` with the absolute path that state directory expands to (by default `$HOME/.local/state/scout`, written out in full):
 
 ```json
 {
@@ -110,7 +119,7 @@ Substitute the real key only in the actual command you run; never display the su
       "command": "uvx",
       "args": [
         "--from", "browser-use[cli]@0.11.9",
-        "python", "${CLAUDE_PLUGIN_ROOT}/services/browser-use-anthropic/scout_browseruse_anthropic.py",
+        "python", "<state dir>/browser-use-anthropic/scout_browseruse_anthropic.py",
         "--mcp"
       ],
       "env": {
@@ -128,7 +137,7 @@ Do not guess a different registration command. Use the script, or the manual JSO
 
 ## Step 5 — Confirm the registration took
 
-The script ends by running `claude mcp get browser-use` and printing the result. Read its output: it should show `Type: stdio`, `Command: uvx`, args including `--from`, `browser-use[cli]@0.11.9`, the shim path `services/browser-use-anthropic/scout_browseruse_anthropic.py`, and `--mcp`, and the env carrying `SCOUT_DEPTH_PROVIDER`, `ANONYMIZED_TELEMETRY`, and `BROWSER_USE_VERSION_CHECK`. Do not print any `ANTHROPIC_API_KEY` value from this output.
+The script ends by running `claude mcp get browser-use` and printing the result. Read its output: it should show `Type: stdio`, `Command: uvx`, args including `--from`, `browser-use[cli]@0.11.9`, the shim path `<state dir>/browser-use-anthropic/scout_browseruse_anthropic.py` (by default `~/.local/state/scout/browser-use-anthropic/scout_browseruse_anthropic.py`, never a path under `~/.claude/plugins/cache/` or inside `~/.scout`), and `--mcp`, and the env carrying `SCOUT_DEPTH_PROVIDER`, `ANONYMIZED_TELEMETRY`, and `BROWSER_USE_VERSION_CHECK`. Do not print any `ANTHROPIC_API_KEY` value from this output. If the script printed a `WARNING` about the shim path, pass it on: the registration names a file a plugin update can delete.
 
 If the entry is missing or wrong, the registration did not take — report the actual script output and stop so the user can retry, rather than reporting a false success.
 
