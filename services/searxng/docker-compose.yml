@@ -1,12 +1,19 @@
 # scout meta — SearXNG metasearch backend (opt-in discovery layer)
 #
-# Started by `scout meta` (the launcher), never on the default `scout` path.
+# Started by start-searxng.sh (next to this file), which both the launcher's
+# `meta` arm and the /scout:meta skill call; never on the default `scout` path.
 # Default scout is zero-dependency and never references this file.
 #
-# scout-specific container_name so this does not clash with any other SearXNG
-# container during the retirement window of the old agents-bin service.
-# No secret lives here — the launcher generates secret_key into the installed
-# settings.yml on first `meta` start (see install.sh `meta)` arm).
+# start-searxng.sh copies this file into scout's user state directory
+# ($STATE_DIR/searxng/, see that script) and runs it from there, so
+# ./config/settings.yml below resolves to the rendered copy in the state
+# directory, not to the template in the plugin. No secret lives here or in the
+# template; the script generates secret_key into the state directory.
+#
+# `name:` pins the compose project so every caller, from whichever plugin copy,
+# addresses the same project. container_name stays scout-specific so it does not
+# clash with any other SearXNG container.
+name: scout-searxng
 services:
   searxng:
     image: searxng/searxng
