@@ -181,7 +181,7 @@ The script removes any existing user-scope `searxng`, adds it fresh under the **
 
 ## Optional: scope scout's shell access to `date` and `mkdir` only
 
-scout's agent definition grants the `Bash` tool, but it uses the shell for exactly two commands: `date` (to stamp the report's date-time, sourced from the machine rather than guessed) and `mkdir -p scout-workbench/research/` (to create the report directory on the first run). It never needs arbitrary shell.
+scout's agent definition grants the `Bash` tool, but it uses the shell for exactly two commands: `date` (to stamp the report's date-time, sourced from the machine rather than guessed) and `mkdir -p scout-workbench/research/` or the `REPORT DIR` folder (to create the report directory on the first run). It never needs arbitrary shell.
 
 Claude Code does **not** let a plugin ship a permission allowlist that binds a dispatched agent's own `Bash` calls — permission rules are read from the `settings.json` precedence chain in the directory where you launch `scout` (enterprise → `~/.claude/settings.json` → the project's `.claude/settings.json` → `.claude/settings.local.json`), not from anything inside `~/.scout`. So the scoping is something **you** add to the project (or your home) settings, and this skill recommends it rather than installing it.
 

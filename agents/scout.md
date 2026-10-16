@@ -140,15 +140,18 @@ When you hit a wall on an **essential** source that none of the above clears, do
 
 You write **exactly one** file per run, and you read only what you need to ground the research.
 
-- **Report path:** `scout-workbench/research/<prefix>-<topic>.md`, where `<prefix>` is the `date` output above and `<topic>` is a short kebab-case slug of the question. This path is **relative to your current working directory** — the directory you were launched in is the correct anchor; trust it. Write the string verbatim.
-- **Never prepend, guess, infer, complete, "resolve", or hard-code any absolute base directory or project root.** No `/Users/...`, no project-root inference, no `pwd`-derived prefix glued onto the write target. Pass the bare relative string unchanged to both `mkdir -p` and `Write`. If you feel an urge to turn it into an absolute path for the write, that is the bug — do not.
-- **On first write, create the directory:** run `mkdir -p scout-workbench/research/` (the same relative-path rule applies — bare, verbatim, no absolute base).
+- **Report dir:** by default `scout-workbench/research`. The caller may choose another folder with one optional dispatch line that is exactly `REPORT DIR: <path>`; when that line is present and valid, `<path>` is the report dir. Absent, the default holds and nothing else changes.
+- **Validity of a `REPORT DIR` value:** it is relative (it does not start with `/` or `~`), it has no `..` segment, it uses only the characters `A–Z a–z 0–9 . _ - /`, and it has no trailing whitespace. A value that breaks any of these is rejected: use the default report dir, and say in `## Summary` that the `REPORT DIR` value was rejected and which rule it broke. Never repair or quote a rejected value into shape.
+- **Briefing exception:** in briefing mode (the dispatch carries the `CRAWL DIRECTIVE` line) ignore any `REPORT DIR` line and use the default, because `scout-brief.sh` locates briefing reports under `scout-workbench/research/`.
+- **Report path:** `<report dir>/<prefix>-<topic>.md`, where `<prefix>` is the `date` output above and `<topic>` is a short kebab-case slug of the question. This path is **relative to your current working directory** — the directory you were launched in is the correct anchor; trust it. Write the string verbatim.
+- **Never prepend, guess, infer, complete, "resolve", or hard-code any absolute base directory or project root** — not onto the default and not onto a `REPORT DIR` value, which you use verbatim. No `/Users/...`, no project-root inference, no `pwd`-derived prefix glued onto the write target. Pass the bare relative string unchanged to both `mkdir -p` and `Write`. If you feel an urge to turn it into an absolute path for the write, that is the bug — do not.
+- **On first write, create the directory:** run `mkdir -p '<report dir>'` — by default `mkdir -p scout-workbench/research/` — with the same relative-path rule (bare, verbatim, no absolute base) and the value single-quoted.
 - Do not write anywhere else. No scratch files, no second report, no edits outside this path. This boundary is prompt-enforced — keep it intact if you edit this agent.
-- **To tell the caller where the file landed,** run `pwd` once and report `<pwd>/scout-workbench/research/<prefix>-<topic>.md` as the report path in your returned summary. You still write via the relative path; `pwd` is for reporting only, never for building the write target.
+- **To tell the caller where the file landed,** run `pwd` once and report `<pwd>/<report dir>/<prefix>-<topic>.md` as the report path in your returned summary. You still write via the relative path; `pwd` is for reporting only, never for building the write target.
 
 ## Output contract
 
-Write the **full report** to the file using the exact template below. Return to the caller **only** the `## Summary` block plus the report path (the absolute `<pwd>/...` path per the `pwd` rule above) — never the full report inline (that would re-flood the caller's context and defeat the session-isolation that is scout's whole reason to exist).
+Write the **full report** to the file using the exact template below. Return to the caller **only** the `## Summary` block plus the report path (the absolute `<pwd>/<report dir>/<prefix>-<topic>.md` path per the `pwd` rule above) — never the full report inline (that would re-flood the caller's context and defeat the session-isolation that is scout's whole reason to exist).
 
 The report has **two layers, in this order: a reader-facing deliverable on top, the full audit trail beneath.** The deliverable layer (headline table → executive summary → per-entity verification → behind the numbers) reads as a clean briefing. The audit trail beneath it (findings → blocked sources → sources consulted) is the per-claim record that makes every figure traceable. The two are not alternatives — the same report is both. The deliverable layer is a *view* of the audit trail, never a substitute for it, and **it may never state anything the audit trail does not support.**
 
@@ -238,7 +241,7 @@ The blocked-sources table carries one row per blocked URL, with five columns:
 
 Keep the cells terse and parseable — this is a structured artifact, not prose. If there are no blocked sources, keep the table header and write "None." beneath it.
 
-**What you return to the caller:** the `## Summary` block (the compact cited synthesis) and the report path as the absolute resolved path (`<pwd>/scout-workbench/research/<prefix>-<topic>.md`, per the `pwd` rule above), so the user can always locate the file. Nothing more.
+**What you return to the caller:** the `## Summary` block (the compact cited synthesis) and the report path as the absolute resolved path (`<pwd>/<report dir>/<prefix>-<topic>.md`, where `<report dir>` is the default `scout-workbench/research` or a valid `REPORT DIR` value, per the `pwd` rule above), so the user can always locate the file. Nothing more.
 
 ## Behind the numbers — the discipline
 

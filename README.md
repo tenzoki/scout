@@ -159,7 +159,7 @@ The `<prefix>` is a date-time stamp. The default renders as `YYYY-MM-DD_HH-MM` (
 
 ### scout's shell access (and how to scope it)
 
-scout runs two shell commands and no others: `date` (to stamp the report's date-time from the machine instead of guessing) and `mkdir -p scout-workbench/research/` (to create the report directory on the first run). To do this its agent definition grants Claude Code's built-in `Bash` tool — but it is **not** an agent-dispatch tool, and scout stays single-agent.
+scout runs two shell commands and no others: `date` (to stamp the report's date-time from the machine instead of guessing) and `mkdir -p scout-workbench/research/` or the `REPORT DIR` folder (to create the report directory on the first run). To do this its agent definition grants Claude Code's built-in `Bash` tool — but it is **not** an agent-dispatch tool, and scout stays single-agent.
 
 A plugin cannot ship a permission rule that binds its agent's own `Bash` calls — Claude Code reads permissions from the `settings.json` in the directory where you launch `scout` (and `~/.claude/settings.json`), not from `~/.scout`. To hold scout to exactly those two commands, add this to your project's `.claude/settings.json` (or `~/.claude/settings.json` for every project):
 
