@@ -2,9 +2,9 @@
 
 A web-research plugin for [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview). You give scout a fully-specified research question; it runs multi-source web research with inline cross-source verification and writes **one cited report file** per run. It returns to you only a compact cited summary plus the path to that report.
 
-The plugin is named **scout**; its single AI agent is also named **scout** (dispatch with `claude --agent scout:scout`).
+The plugin is named **scout**; its single AI agent is also named **scout**, addressed as `scout:scout`. It runs two ways: as the main agent of its own session (`claude --agent scout:scout`, or the `scout` launcher), or as a sub-agent that another agent dispatches (see [Use scout from another agent](#use-scout-from-another-agent)).
 
-scout was carved out of [flight](https://github.com/tenzoki/flight) so that research's context-firehose traffic — dozens of search results and fetched pages — stays out of a working conversation. You run scout in its own session, get one report file, and hand that file to flight's `pilot` for synthesis. Same family.
+scout was carved out of [flight](https://github.com/tenzoki/flight) so that research's context-firehose traffic — dozens of search results and fetched pages — stays out of a working conversation. You run scout in its own session, or let another agent dispatch it, get one report file, and hand that file to flight's `pilot` for synthesis. Same family.
 
 ## The two-layer model
 
@@ -17,7 +17,7 @@ A user who never registers the depth layer keeps a fully working breadth researc
 
 ## What scout produces
 
-scout writes one cited report per run to `scout-workbench/research/<prefix>-<topic>.md` and returns a compact summary plus that path. The report has **two layers**:
+scout writes one cited report per run, by default to `scout-workbench/research/<prefix>-<topic>.md` (the caller can choose another folder, see [Where the report lands](#where-the-report-lands)), and returns a compact summary plus that path. The report has **two layers**:
 
 - **A reader-facing deliverable on top** — a headline table (one row per entity, each with a confidence and a method/source column), an executive summary, per-entity verification, and a sourced "behind the numbers" analysis section. This reads as a clean briefing.
 - **The full audit trail beneath** — the per-claim record where every figure is traceable: **claim → sources → method → confidence → verification**, followed by a blocked-sources table and the full list of sources consulted.
@@ -39,7 +39,31 @@ scout does the research; pilot does the synthesis.
 
 **scout cannot ask you clarifying questions mid-run.** It runs autonomously from the moment you dispatch it. So state the full question up front: scope, constraints, language, any source preferences or exclusions, and how deep to go. If the question is under-specified, scout does its best and records the ambiguity in the report rather than stalling — but a tighter question gets a tighter report.
 
-## Quick start (recommended — one line, no git)
+## Use scout from another agent
+
+Any agent in a session where the scout plugin is loaded can hand research to scout and get the report path back. The plugin is loaded when it is installed and enabled through the marketplace (see [Install through the Claude Code marketplace](#install-through-the-claude-code-marketplace)), or when the session was started with `--plugin-dir ~/.scout`. Dispatch it through Claude Code's `Agent` tool:
+
+```
+Agent(subagent_type: "scout:scout", prompt: "<one fully specified question>")
+```
+
+What goes into the prompt:
+
+- **One fully specified question.** The rule above applies unchanged: scope, constraints, language, source preferences and depth, all stated up front. scout cannot ask the dispatching agent anything mid-run either.
+- **Optionally, one `REPORT DIR:` line** to choose the folder the report is written to, relative to the session's working directory. Example: `REPORT DIR: fusion-workbench/shared/research`. Without it the report goes to `scout-workbench/research/`. The rules for the value are under [Where the report lands](#where-the-report-lands).
+- **Never a line reading `CRAWL DIRECTIVE`.** That line switches scout into briefing mode and is reserved for `scout brief`.
+
+What comes back is the compact cited summary plus the absolute path of the report file, never the full report. The dispatching agent reads the file when it needs the detail, so the research traffic stays out of its context.
+
+### For plugin authors: depend on scout softly
+
+scout is an optional companion, not a requirement. The pattern we recommend for another plugin's agent is a soft dependency: **if `scout:scout` is among your available agent types, dispatch it; otherwise research with `WebSearch` and `WebFetch` yourself.** The agent reads its own list of available agent types at dispatch time, so it never has to predict whether the user installed scout.
+
+Do not declare scout in your plugin's `dependencies`. That field is a hard dependency, which forces scout onto every user of your plugin.
+
+## Quick start with the launcher (one line, no git)
+
+scout installs two ways, and both are supported: this one-line installer, which also gives you the `scout` command, and the [Claude Code marketplace](#install-through-the-claude-code-marketplace). Read [Two copies](#two-copies-launcher-and-marketplace) before you use both.
 
 In your terminal:
 
@@ -112,7 +136,7 @@ The one-line installer writes to exactly two places — both in your home folder
                         stilwerk/, README, LICENSE
 ```
 
-The launcher is one line — `claude --plugin-dir ~/.scout --agent scout:scout "$@"` — so every run loads the plugin straight from `~/.scout`. That is why update and uninstall are reliable: there is no cache to get out of sync. `scout --where` prints the plugin path any time.
+The launcher is one line — `claude --plugin-dir ~/.scout --agent scout:scout "$@"` — so every run loads the plugin straight from `~/.scout`. That is why update and uninstall are reliable: there is no cache to get out of sync. `scout --where` prints the plugin path any time. The optional depth layer and SearXNG backend keep their files in a third place, [scout's state directory](#scouts-state-directory), which `scout --update` does not touch.
 
 On **Windows**, the layout mirrors the home-folder convention:
 
@@ -132,28 +156,86 @@ Both locations are overridable with environment variables before installing
 - `SCOUT_HOME` — where the plugin files go (default `~/.scout`, or `%USERPROFILE%\.scout` on Windows)
 - `SCOUT_BIN` — where the `scout` launcher goes (default `~/.local/bin`, or `%USERPROFILE%\.local\bin` on Windows)
 
-To remove scout completely: `scout --uninstall` (which is just `rm -rf ~/.scout` plus removing the launcher). Claude Code's own `~/.claude/` directory is never touched.
+`scout --uninstall` removes `~/.scout` and the launcher. On mac and Linux it also removes the SearXNG container and scout's [state directory](#scouts-state-directory), printing the directory's path first. It leaves the MCP registrations in place, because they live in Claude Code's own config; [Remove scout completely](#remove-scout-completely) lists the commands for those.
 
-### Alternative: Claude Code marketplace
+## Install through the Claude Code marketplace
 
-If you prefer the built-in plugin system (note: it uses git, which can fail when your git is configured for SSH):
+scout is published in the `tenzoki-plugins` marketplace. Inside a Claude Code session:
 
-```bash
+```
 /plugin marketplace add tenzoki/claude-plugins
 /plugin install scout@tenzoki-plugins
 ```
 
-(Registering scout in that marketplace is out of scope for this build; the one-line installer above is the supported path today.)
+The marketplace route fetches through git, which can fail when your git is configured for SSH. The one-line installer above needs no git.
+
+A marketplace install loads scout in every session where the plugin is enabled. That gives you the `scout:scout` agent for [dispatch from other agents](#use-scout-from-another-agent), `/scout:setup` and `/scout:meta`. It gives you no `scout` shell command, so `scout brief` and the `--key` flag need the launcher install; `/scout:meta` replaces `scout meta`.
+
+### Updates arrive with a version bump, and you pull them
+
+Claude Code installs the version named in scout's manifest, so a change reaches marketplace users only when scout's version is bumped. Third-party marketplaces do not auto-update by default, so pull a new release yourself. First refresh the marketplace listing inside a Claude Code session:
+
+```
+/plugin marketplace update tenzoki-plugins
+```
+
+Then update the plugin from your terminal:
+
+```bash
+claude plugin update scout@tenzoki-plugins
+```
+
+Restart Claude Code afterwards to load the new version. If the release notes say the shim or the browser-use pin changed, re-run `/scout:setup` as well (see [After an update](#after-an-update-re-run-scoutsetup-when-the-shim-or-the-pin-changed)).
+
+### Two copies: launcher and marketplace
+
+With both installs on one machine you have **two separate copies of scout**, and they do not know about each other:
+
+- **A `scout` launcher session loads `~/.scout`.** The launcher starts Claude Code with `--plugin-dir ~/.scout`, and a `--plugin-dir` plugin takes precedence over an installed plugin of the same name for that session. The marketplace copy is silently replaced; nothing tells you which copy is running.
+- **The update commands refresh different copies.** `scout --update` refreshes `~/.scout` only. `claude plugin update scout@tenzoki-plugins` refreshes the marketplace copy only.
+
+So a fix you pulled with one command is missing from sessions that load the other copy. Keep one install, or update both together. Both copies share one [state directory](#scouts-state-directory), so the depth-layer registration and the SearXNG secret are the same whichever copy you run.
+
+## scout's state directory
+
+Some of scout's files must outlive every copy of the plugin: the browser-use shim that the depth-layer registration points at, and the SearXNG secret and rendered config that the container mounts. A plugin update replaces the plugin folder, and `scout --update` replaces `~/.scout`, so scout keeps these files in one user-scoped state directory instead:
+
+```
+${SCOUT_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/scout}
+```
+
+By default that is `~/.local/state/scout`. Set `SCOUT_STATE_DIR` to move it; it must be an absolute path outside `~/.claude/plugins/cache/`, and the scripts refuse any other value. Every caller uses the same directory: the launcher, `/scout:setup`, `/scout:meta`, and the scripts run by hand.
+
+```
+~/.local/state/scout/browser-use-anthropic/scout_browseruse_anthropic.py   the registered shim copy
+~/.local/state/scout/searxng/secret_key                                    generated once, mode 600
+~/.local/state/scout/searxng/config/settings.yml                           rendered on every start
+~/.local/state/scout/searxng/docker-compose.yml                            copied on every start
+```
+
+The state directory applies to the mac and Linux scripts. The Windows launcher still keeps the shim and the SearXNG secret inside `%USERPROFILE%\.scout`.
 
 ## Where the report lands
 
-Every run writes exactly one report to:
+Every run writes exactly one report. By default it goes to:
 
 ```
 scout-workbench/research/<prefix>-<topic>.md
 ```
 
 `scout-workbench/` is scout's runtime workbench, created in your project on the first run (scout runs `mkdir -p scout-workbench/research/` itself). It is gitignored by the plugin source tree but lives in *your* project — keep it or commit it as you see fit.
+
+### Choose the folder with `REPORT DIR`
+
+Whoever dispatches scout can choose the folder by adding one line to the question that is exactly `REPORT DIR: <path>`:
+
+```
+REPORT DIR: fusion-workbench/shared/research
+```
+
+The report then lands at `<path>/<prefix>-<topic>.md`, and scout creates that folder instead of `scout-workbench/research/`. The path is relative to the directory scout runs in, and scout reports the resulting absolute path back.
+
+scout accepts the value only if it is relative (no leading `/` or `~`), has no `..` segment, and uses only `A–Z a–z 0–9 . _ - /`. A value that breaks a rule is not repaired: scout writes to the default folder and says in its summary that the `REPORT DIR` value was rejected and why. In a briefing run (`scout brief`) the line is ignored, because the briefing locates its section reports under `scout-workbench/research/`.
 
 The `<prefix>` is a date-time stamp. The default renders as `YYYY-MM-DD_HH-MM` (e.g. `2026-06-14_13-45`). You can override it by setting the environment variable `SCOUT_FILE_PREFIX` to a `date(1)` strftime string — e.g. `export SCOUT_FILE_PREFIX='%Y%m%d-%H%M%S'` for full-year + seconds precision. Default keeps existing reports sorting consistently; change it only on a clean project.
 
@@ -335,7 +417,9 @@ BROWSERUSE_INHERIT=1 bash ~/.scout/skills/setup/register-browser-use.sh
 BROWSERUSE_ANTHROPIC_KEY=sk-ant-... bash ~/.scout/skills/setup/register-browser-use.sh
 ```
 
-Run with neither variable on an interactive terminal and it offers inherit (when `ANTHROPIC_API_KEY` is set) or prompts for a key with hidden input. It never writes the key to a file or echoes it. (Adjust the path if you set `SCOUT_HOME`.)
+Run with neither variable on an interactive terminal and it offers inherit (when `ANTHROPIC_API_KEY` is set) or prompts for a key with hidden input. It never writes the key to a file or echoes it. (Adjust the path if you set `SCOUT_HOME`. With a marketplace install the script sits in Claude Code's plugin cache, so use `/scout:setup` there.)
+
+**The registration names a copy of the shim in scout's state directory, never a file inside the plugin.** The script copies `services/browser-use-anthropic/scout_browseruse_anthropic.py` to `~/.local/state/scout/browser-use-anthropic/` (see [scout's state directory](#scouts-state-directory)), checks the copy byte for byte, and registers that path. A plugin update replaces the plugin folder, and a marketplace update deletes the old version's folder 14 days later; a registration pointing into it would stop starting without an error. `claude mcp get browser-use` should show the shim under `~/.local/state/scout/`. The script prints a `WARNING` if it finds the path under `~/.claude/plugins/cache/` instead.
 
 > **Inherit mode: export the key *before* you start Claude Code.** With `BROWSERUSE_INHERIT=1`, no key is written to the config — the browser-use MCP server reads `ANTHROPIC_API_KEY` from the environment of the Claude Code process *at the moment that process launches*. If the key was not exported before Claude Code started, registration still shows green, but your first `browser_extract_content` call fails with an opaque auth error. So export the key first, then launch Claude Code:
 >
@@ -350,9 +434,22 @@ Run with neither variable on an interactive terminal and it offers inherit (when
 
 > **Inherit mode changes your whole-session auth.** Exporting `ANTHROPIC_API_KEY` session-wide (the inherit-mode path) switches the entire Claude Code session to **API-key auth** — which disables claude.ai-subscription auth and **Remote Control** (and some orgs disallow Remote Control by policy). If you rely on subscription auth or Remote Control *and* want the depth layer, **pin** the key into the browser-use server instead (`BROWSERUSE_ANTHROPIC_KEY=...` via `/scout:setup` or the script). Then only the browser-use server sees the key, the session environment stays clean, and session auth — including Remote Control — is unaffected. (The SearXNG meta backend needs no Anthropic key, so it never triggers this.)
 
+### After an update, re-run `/scout:setup` when the shim or the pin changed
+
+The shim copy is refreshed only when the registration runs. Updating scout, by either route, leaves the old copy in place, and the depth layer keeps working with it. When a scout release's notes say the shim or the browser-use pin changed, re-run `/scout:setup` (or the register script) once to copy the new shim and register the new pin.
+
+### Manual registration
+
 The manual JSON block below is the ultimate fallback if you would rather edit your MCP settings yourself.
 
-Add this to your Claude Code MCP settings. It runs browser-use locally via `uvx`, pinned to the version scout is tested against, through scout's Anthropic shim:
+First copy the shim into the state directory, from your scout install (`~/.scout` for the launcher; adjust for a marketplace install):
+
+```bash
+mkdir -p "${SCOUT_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/scout}/browser-use-anthropic"
+cp ~/.scout/services/browser-use-anthropic/scout_browseruse_anthropic.py "${SCOUT_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/scout}/browser-use-anthropic/"
+```
+
+Then add this to your Claude Code MCP settings, with `<state dir>` replaced by the absolute path that directory expands to (by default `/Users/<you>/.local/state/scout` or `/home/<you>/.local/state/scout`, written out in full). It runs browser-use locally via `uvx`, pinned to the version scout is tested against, through scout's Anthropic shim:
 
 ```json
 {
@@ -361,7 +458,7 @@ Add this to your Claude Code MCP settings. It runs browser-use locally via `uvx`
       "command": "uvx",
       "args": [
         "--from", "browser-use[cli]@0.11.9",
-        "python", "${CLAUDE_PLUGIN_ROOT}/services/browser-use-anthropic/scout_browseruse_anthropic.py",
+        "python", "<state dir>/browser-use-anthropic/scout_browseruse_anthropic.py",
         "--mcp"
       ],
       "env": {
@@ -424,13 +521,17 @@ SearXNG needs both an MCP registration and a running container:
 
    This registers the `searxng` MCP server under the user scope, pointed at `http://localhost:8911`, with no API key (self-hosted needs none). It writes no secret.
 
-2. **Start the container** — launch scout with the `meta` flag:
+2. **Start the container** — launch scout with the `meta` flag, or run `/scout:meta` in a Claude Code session:
 
    ```bash
    scout meta     # starts the local SearXNG Docker container, then launches scout
    ```
 
-   `scout meta` brings up the container (`docker compose up -d` against the bundled `services/searxng/docker-compose.yml`), waits for it to report healthy, then launches scout. If Docker is missing, the container fails to start, or the health-wait times out, it prints a plain message naming the cause and launches scout with `WebSearch` instead — it never hard-fails.
+   ```
+   /scout:meta    # starts the container from inside any session; the marketplace install's route
+   ```
+
+   Both run the same script, `services/searxng/start-searxng.sh`. It leaves a container that already answers on port 8911 alone. Otherwise it renders the settings and copies the compose file into scout's [state directory](#scouts-state-directory), runs `docker compose up -d` against that copy, and waits up to 30 seconds for SearXNG to answer. Because the container mounts the files in the state directory, it keeps running after the plugin copy it was started from is updated. If Docker is missing, the container fails to start, or the health-wait times out, `scout meta` prints a plain message naming the cause and launches scout with `WebSearch` instead — it never hard-fails. `/scout:meta` relays the same cause and says that scout falls back to `WebSearch`. The container runs until you stop it with `docker stop scout-searxng`.
 
    **`scout meta` works on Windows too**, with the same behaviour: it needs **Docker Desktop** (checked when you run `scout meta`, not at install time), generates the `secret_key` with Windows-native crypto instead of openssl, and falls back to `WebSearch` on any failure — Docker absent, container start fails, or health-wait times out.
 
@@ -442,7 +543,7 @@ The bundled SearXNG settings enable `json` output (`search.formats: [html, json]
 
 ### The secret is generated per deployment — never shipped
 
-SearXNG needs a `server.secret_key`. scout **does not ship one** — the committed `settings.yml` carries an empty `secret_key`. On the first `scout meta` start, the launcher generates a real key into your **installed** copy at `~/.scout/services/searxng/config/settings.yml` (`%USERPROFILE%\.scout\services\searxng\config\settings.yml` on Windows). On mac/Linux it uses `openssl rand -hex 32`; on Windows it uses Windows-native crypto (`System.Security.Cryptography`), since openssl is not present by default. The repo never contains a real secret, and every deployment gets its own.
+SearXNG needs a `server.secret_key`. scout **does not ship one** — the committed `settings.yml` carries an empty `secret_key`, and the start script never writes to it. On mac/Linux, the first start (`scout meta` or `/scout:meta`) generates a key with `openssl rand -hex 32` into `~/.local/state/scout/searxng/secret_key` (mode 600). Every start then renders `~/.local/state/scout/searxng/config/settings.yml` from the shipped template with that key filled in, so the key survives `scout --update` and plugin updates while template changes in a new release still reach the container. On Windows the launcher generates the key with Windows-native crypto (`System.Security.Cryptography`), since openssl is not present by default, into the installed copy at `%USERPROFILE%\.scout\services\searxng\config\settings.yml`. The repo never contains a real secret, and every deployment gets its own.
 
 The bundled settings also set `limiter: false`, which is fine for single-user localhost. If you expose this SearXNG on a shared or public host, re-enable the limiter.
 
@@ -468,6 +569,19 @@ cd ~ && claude mcp remove searxng -s project
 
 To find which file defines it, `claude mcp get searxng` shows the scope, and the entry is in the `.mcp.json` of whichever directory Claude resolved it from.
 
+## Remove scout completely
+
+scout leaves pieces in four places: the plugin copy, two user-scope MCP registrations in Claude Code's config, the SearXNG container, and the [state directory](#scouts-state-directory). Remove the plugin copy with `scout --uninstall` (launcher) or `claude plugin uninstall scout@tenzoki-plugins` (marketplace), then the rest:
+
+```bash
+claude mcp remove browser-use -s user
+claude mcp remove searxng -s user
+docker rm -f scout-searxng
+rm -rf ~/.local/state/scout
+```
+
+On mac and Linux, `scout --uninstall` already runs the last two. Run only the lines for the parts you set up; a line for something that is not there fails harmlessly. If you set `SCOUT_STATE_DIR`, remove that directory instead of `~/.local/state/scout`.
+
 ## Language
 
 Default is English. scout ships professional-voice style profiles (for the report prose) and chat-voice profiles (for the compact summary it returns) in English and German. For other languages, it reads the English profile and applies the same intent in the target language.
@@ -475,9 +589,9 @@ Default is English. scout ships professional-voice style profiles (for the repor
 ## Requirements
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) v2.0.12 or higher.
-- That's it for the breadth layer — no git, no Node, no Python, no Docker.
+- That's it for the breadth layer — no Node, no Python, no Docker, and no git with the one-line installer (the marketplace route fetches through git).
 - The optional depth layer adds its own requirements: `uvx` (from [uv](https://github.com/astral-sh/uv)) to run browser-use locally, an `ANTHROPIC_API_KEY` (extraction runs on Anthropic via scout's shim), and a local Chromium that browser-use manages. See **Optional depth layer (browser-use)** above. None of this is needed for breadth.
-- The optional SearXNG meta backend needs `npx` (from [Node.js](https://nodejs.org)) to run the MCP, and **Docker** to run the container via `scout meta`. Docker is needed **only** for `meta` — never for the default `scout` path. See **Optional metasearch backend (SearXNG)** above.
+- The optional SearXNG meta backend needs `npx` (from [Node.js](https://nodejs.org)) to run the MCP, and **Docker** to run the container via `scout meta` or `/scout:meta`; the first start on mac/Linux also needs `openssl` to generate the secret. Docker is needed **only** for `meta` — never for the default `scout` path. See **Optional metasearch backend (SearXNG)** above.
 
 ## License
 
