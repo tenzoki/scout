@@ -70,7 +70,7 @@ case "$STATE_DIR" in
   *) echo "Stopping: the scout state directory must be an absolute path, got '$STATE_DIR' (set SCOUT_STATE_DIR or XDG_STATE_HOME to an absolute path)." >&2; exit 1 ;;
 esac
 case "$STATE_DIR" in
-  */plugins/cache/*) echo "Stopping: the scout state directory '$STATE_DIR' lies inside a plugin cache, which a plugin update deletes. Point SCOUT_STATE_DIR somewhere outside it." >&2; exit 1 ;;
+  */plugins/cache|*/plugins/cache/*) echo "Stopping: the scout state directory '$STATE_DIR' lies inside a plugin cache, which a plugin update deletes. Point SCOUT_STATE_DIR somewhere outside it." >&2; exit 1 ;;
 esac
 SHIM_DIR="$STATE_DIR/browser-use-anthropic"
 SHIM_PATH="$SHIM_DIR/scout_browseruse_anthropic.py"

@@ -148,20 +148,28 @@ case "\${1:-}" in
     rm -rf "\$SCOUT_DIR" "$LAUNCHER"
     # The SearXNG container and scout's user state directory (SearXNG secret and
     # config, the browser-use shim copy) live outside the install; remove them
-    # too. Same state-dir rule as the scripts that write it.
+    # too. Same state-dir rule as the scripts that write it. Only the two
+    # subtrees scout writes are removed, never the directory itself: it may be
+    # a user-chosen SCOUT_STATE_DIR holding other files, and rmdir only
+    # succeeds when nothing else is left in it.
     docker rm -f scout-searxng >/dev/null 2>&1 || true
     SCOUT_STATE="\${SCOUT_STATE_DIR:-\${XDG_STATE_HOME:-\$HOME/.local/state}/scout}"
     case "\$SCOUT_STATE" in
-      /|"\$HOME"|"\$HOME/") echo "scout: not removing state directory '\$SCOUT_STATE' (refusing a root or home path)." >&2 ;;
+      /|"\$HOME"|"\$HOME/") echo "scout: not touching state directory '\$SCOUT_STATE' (refusing a root or home path)." >&2 ;;
+      */plugins/cache|*/plugins/cache/*) echo "scout: not touching state directory '\$SCOUT_STATE' (it lies inside the plugin cache)." >&2 ;;
       /?*)
-        if [ -d "\$SCOUT_STATE" ]; then
-          echo "scout: removing state directory \$SCOUT_STATE"
-          rm -rf "\$SCOUT_STATE"
-        fi
+        for SCOUT_SUB in browser-use-anthropic searxng; do
+          if [ -e "\$SCOUT_STATE/\$SCOUT_SUB" ]; then
+            echo "scout: removing \$SCOUT_STATE/\$SCOUT_SUB"
+            rm -rf "\$SCOUT_STATE/\$SCOUT_SUB"
+          fi
+        done
+        rmdir "\$SCOUT_STATE" 2>/dev/null || true
         ;;
-      *) echo "scout: not removing state directory '\$SCOUT_STATE' (not an absolute path)." >&2 ;;
+      *) echo "scout: not touching state directory '\$SCOUT_STATE' (not an absolute path)." >&2 ;;
     esac
     echo "scout removed. A registered browser-use MCP entry stays until you run: claude mcp remove browser-use -s user"
+    echo "A marketplace copy of scout (scout@tenzoki-plugins) shares this state directory: re-run /scout:setup there to restore its depth layer."
     exit 0
     ;;
   --where)

@@ -196,6 +196,13 @@ With both installs on one machine you have **two separate copies of scout**, and
 
 So a fix you pulled with one command is missing from sessions that load the other copy. Keep one install, or update both together. Both copies share one [state directory](#scouts-state-directory), so the depth-layer registration and the SearXNG secret are the same whichever copy you run.
 
+## Upgrading from 0.5.0
+
+Two things changed in 0.6.0 that an existing install does not pick up by itself:
+
+- **SearXNG container.** 0.5.0 created `scout-searxng` under the compose project `searxng`; 0.6.0 uses the project `scout-searxng`. The next `scout meta` or `/scout:meta` finds the old container, removes it and says so, then starts a fresh one. To do it by hand instead, run `docker rm -f scout-searxng` once before the first start on 0.6.0.
+- **Depth layer.** Re-run `/scout:setup` once, so the shim is copied into the [state directory](#scouts-state-directory) and the registration names that copy instead of a path inside the plugin folder.
+
 ## scout's state directory
 
 Some of scout's files must outlive every copy of the plugin: the browser-use shim that the depth-layer registration points at, and the SearXNG secret and rendered config that the container mounts. A plugin update replaces the plugin folder, and `scout --update` replaces `~/.scout`, so scout keeps these files in one user-scoped state directory instead:
@@ -580,7 +587,7 @@ docker rm -f scout-searxng
 rm -rf ~/.local/state/scout
 ```
 
-On mac and Linux, `scout --uninstall` already runs the last two. Run only the lines for the parts you set up; a line for something that is not there fails harmlessly. If you set `SCOUT_STATE_DIR`, remove that directory instead of `~/.local/state/scout`.
+On mac and Linux, `scout --uninstall` already removes the container and the state directory's two subfolders, `browser-use-anthropic/` and `searxng/`. It then removes the state directory only if it is empty, so other files in a directory you chose with `SCOUT_STATE_DIR` are left alone. A marketplace copy on the same machine shares those subfolders, so re-run `/scout:setup` there afterwards if you keep it. Run only the lines for the parts you set up; a line for something that is not there fails harmlessly. If you set `SCOUT_STATE_DIR`, remove scout's subfolders in that directory instead of `~/.local/state/scout`.
 
 ## Language
 

@@ -37,9 +37,22 @@ case "$STATE_DIR" in
   *) echo "scout meta: state directory must be an absolute path, got '$STATE_DIR' (SCOUT_STATE_DIR / XDG_STATE_HOME)." >&2; exit 1 ;;
 esac
 case "$STATE_DIR" in
-  */plugins/cache/*) echo "scout meta: state directory '$STATE_DIR' lies inside the plugin cache, which a plugin update deletes. Set SCOUT_STATE_DIR elsewhere." >&2; exit 1 ;;
+  */plugins/cache|*/plugins/cache/*) echo "scout meta: state directory '$STATE_DIR' lies inside the plugin cache, which a plugin update deletes. Set SCOUT_STATE_DIR elsewhere." >&2; exit 1 ;;
 esac
 WORK_DIR="$STATE_DIR/searxng"
+
+# --- (0) Replace a scout-searxng container from another compose project --------
+# scout 0.5.0 ran the same container_name under the implicit project "searxng".
+# Such a container blocks "compose up" on the name conflict when stopped, and
+# mounts a stale config when running. The name is scout's own, so remove it.
+if command -v docker >/dev/null 2>&1; then
+  LEGACY_PROJECT="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' scout-searxng 2>/dev/null)" && {
+    if [ "$LEGACY_PROJECT" != "scout-searxng" ]; then
+      echo "scout meta: removing container scout-searxng from compose project '$LEGACY_PROJECT' (left by an older scout)."
+      docker rm -f scout-searxng >/dev/null || { echo "scout meta: could not remove the old scout-searxng container; run: docker rm -f scout-searxng" >&2; exit 1; }
+    fi
+  }
+fi
 
 # --- (a) Already running: leave it alone --------------------------------------
 if curl -fsS "$URL" >/dev/null 2>&1; then
