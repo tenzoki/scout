@@ -67,7 +67,10 @@ being passed to Anthropic.
 
 ## 3. Register, then drive a real extraction
 
-Register the depth layer through the normal path:
+Register the depth layer through the normal path, with
+`SCOUT_DEPTH_EXTRACT_MODEL` and `SCOUT_DEPTH_EXTRACT_TEMPERATURE` unset, so this
+step exercises the shipped default model (`claude-haiku-4-5`) at its default
+temperature `0`:
 
 ```bash
 # via the skill:

@@ -62,11 +62,15 @@ curl -fsSL "$TARBALL_URL" -o "$TMP/scout.tar.gz" \
 Check your internet connection and that the ref exists."
 tar -xzf "$TMP/scout.tar.gz" -C "$TMP" || die "Could not extract the archive."
 
-SRC="$(find "$TMP" -maxdepth 1 -type d -name 'scout-*' | head -1)"
+# First line taken in the shell, not with `| head -1`: under pipefail an early
+# exiting head can fail the pipeline with SIGPIPE on the writer.
+SRC="$(find "$TMP" -maxdepth 1 -type d -name 'scout-*')"
+SRC="${SRC%%$'\n'*}"
 [ -n "$SRC" ] && [ -f "$SRC/.claude-plugin/plugin.json" ] \
   || die "Downloaded archive does not look like the scout plugin (no .claude-plugin/plugin.json)."
 
-VERSION="$(sed -n 's/.*"version" *: *"\([^"]*\)".*/\1/p' "$SRC/.claude-plugin/plugin.json" | head -1)"
+VERSION="$(sed -n 's/.*"version" *: *"\([^"]*\)".*/\1/p' "$SRC/.claude-plugin/plugin.json")"
+VERSION="${VERSION%%$'\n'*}"
 
 # --- 3. Install into ~/.scout (atomic replace) -------------------------------
 say "Installing to $INSTALL_DIR ..."

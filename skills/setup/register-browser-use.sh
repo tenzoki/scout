@@ -138,16 +138,20 @@ fi
 
 # Optional extraction overrides, forwarded into the registration only when set.
 # They are spliced into a JSON string in inherit mode, so the characters that
-# would break that string are refused. The shim itself range-checks the
-# temperature ([0, 1]); here it only has to be number-shaped.
+# would break that string are refused. The temperature is checked here against
+# the same rule the shim applies (a decimal number in [0, 1]), because the
+# shim's refusal note goes to the MCP server's stderr, which nobody reads: a
+# value it would drop must fail this registration instead.
 MODEL="${SCOUT_DEPTH_EXTRACT_MODEL:-}"
 case "$MODEL" in
   *'"'*|*'\'*) echo "Stopping: SCOUT_DEPTH_EXTRACT_MODEL contains a \" or \\; a model name never does." >&2; exit 1 ;;
 esac
 TEMPERATURE="${SCOUT_DEPTH_EXTRACT_TEMPERATURE:-}"
-case "$TEMPERATURE" in
-  *[!0-9.]*) echo "Stopping: SCOUT_DEPTH_EXTRACT_TEMPERATURE must be a number in [0, 1], got '$TEMPERATURE'." >&2; exit 1 ;;
-esac
+# Held in a variable: bash 3.2 and 5 then read the pattern the same way.
+TEMPERATURE_RE='^(0(\.[0-9]+)?|1(\.0+)?|\.[0-9]+)$'
+if [ -n "$TEMPERATURE" ] && ! [[ "$TEMPERATURE" =~ $TEMPERATURE_RE ]]; then
+  echo "Stopping: SCOUT_DEPTH_EXTRACT_TEMPERATURE must be a number in [0, 1], got '$TEMPERATURE'." >&2; exit 1
+fi
 # The same overrides in the two shapes the two registration forms take: a JSON
 # fragment (inherit) and `-e NAME=value` flags (pinned key).
 OPT_JSON=""

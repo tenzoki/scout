@@ -103,11 +103,12 @@ Substitute the real key only in the actual command you run; never display the su
 
 The script copies the shim out of this plugin copy into scout's state directory, `${SCOUT_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/scout}`, and registers that copy. A plugin update replaces the plugin tree, so the registration must never name a file inside it. When a later scout release changes the shim or the browser-use pin, the user re-runs `/scout:setup` to refresh the copy.
 
-**Fallback — if the script cannot run in this environment** (e.g. the CLI registration forms fail in this Claude Code version): first create the shim copy with the two shell lines below, then print the exact JSON `mcpServers` block for the user to paste into their MCP settings by hand, and tell them plainly that you are falling back to the manual paste because the scripted registration was unavailable:
+**Fallback — if the script cannot run in this environment** (e.g. the CLI registration forms fail in this Claude Code version): first create the shim copy with the three shell lines below (the third writes the `.scout-owned` marker the script writes, without which `scout --uninstall` leaves the folder in a custom `SCOUT_STATE_DIR`), then print the exact JSON `mcpServers` block for the user to paste into their MCP settings by hand, and tell them plainly that you are falling back to the manual paste because the scripted registration was unavailable:
 
 ```bash
 mkdir -p "${SCOUT_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/scout}/browser-use-anthropic"
 cp "${CLAUDE_PLUGIN_ROOT}"/services/browser-use-anthropic/scout_browseruse_anthropic.py "${SCOUT_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/scout}/browser-use-anthropic/"
+[ -f "${SCOUT_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/scout}/browser-use-anthropic/.scout-owned" ] || printf '%s\n' "Written by scout (register-browser-use.sh). scout --uninstall removes this folder only while this file is here." > "${SCOUT_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/scout}/browser-use-anthropic/.scout-owned"
 ```
 
 In the JSON, replace `<state dir>` with the absolute path that state directory expands to (by default `$HOME/.local/state/scout`, written out in full):

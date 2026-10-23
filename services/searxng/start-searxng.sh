@@ -55,8 +55,16 @@ PROJECT="scout-searxng"
 # port 8911 as SearXNG (not any web server) and proves the `json` output the
 # mcp-searxng server needs is switched on. limiter is off in the template, so a
 # local curl is not throttled.
+# The body is captured first and tested afterwards, never piped into `grep -q`:
+# GNU grep exits on its first match, curl's next write then fails with EPIPE
+# (exit 23), and pipefail would report a healthy SearXNG as down.
 searxng_answers() {
-  curl -fsS --max-time 10 "${URL}search?q=scout&format=json" 2>/dev/null | grep -q '"results"'
+  local body
+  body="$(curl -fsS --max-time 10 "${URL}search?q=scout&format=json" 2>/dev/null)" || return 1
+  case "$body" in
+    *'"results"'*) return 0 ;;
+  esac
+  return 1
 }
 
 # --- (0) Replace a scout-searxng container from another compose project --------
@@ -135,7 +143,8 @@ if [ ! -s "$SECRET_FILE" ]; then
   mv "$SECRET_TMP" "$SECRET_FILE"
 fi
 SECRET="$(tr -d '[:space:]' < "$SECRET_FILE")"
-if ! printf '%s' "$SECRET" | grep -Eq '^[0-9a-fA-F]{32,}$'; then
+SECRET_RE='^[0-9a-fA-F]{32,}$'
+if ! [[ "$SECRET" =~ $SECRET_RE ]]; then
   echo "scout meta: $SECRET_FILE does not hold a hex secret; delete it to regenerate." >&2
   exit 1
 fi
