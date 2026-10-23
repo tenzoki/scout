@@ -22,6 +22,9 @@
 #      story at a second outlet is reached through its entities, and a story whose
 #      actor was renamed between runs (a parent company against its subsidiary,
 #      sharing no name token at all) is reached only through its words.
+#      Tokens are split on ASCII, CJK and full-width punctuation alike, and a run
+#      of Chinese or Japanese characters, written without spaces, also yields
+#      every pair of adjacent characters as a token, so a name inside it can match.
 #   3. ranking: entity overlap descending, then word overlap descending, then date
 #      descending. The first --max entries are printed.
 #
@@ -203,6 +206,10 @@ function foldrange(lo, hi, delta,   cp) {
 	for (cp = lo; cp <= hi; cp++) { FOLDN++; FU[FOLDN] = utf8(cp); FL[FOLDN] = utf8(cp + delta) }
 }
 
+function punctrange(lo, hi,   cp) {
+	for (cp = lo; cp <= hi; cp++) { PUNCTN++; PU[PUNCTN] = utf8(cp) }
+}
+
 function foldcase(s,   t, i) {
 	# Lowercase, independent of the locale. The script is pinned to LC_ALL=C so
 	# that it tokenises identically everywhere, and in C `tolower()` folds ASCII
@@ -226,10 +233,25 @@ function foldcase(s,   t, i) {
 	return t
 }
 
+function cjkpunct(t,   i) {
+	# Non-ASCII punctuation to space. `[[:punct:]]` is ASCII-only under the
+	# pinned C locale, so without this `阿里巴巴、百度、腾讯` stays one token and
+	# `腾讯（Tencent）` glues the Latin name to the Chinese around it. The table
+	# (built in BEGIN) holds the CJK Symbols and Punctuation block, the
+	# full-width and half-width punctuation forms, the katakana middle dot, and
+	# the General Punctuation dashes, quotes and ellipsis Chinese text sets its
+	# sentences with. Every entry is a whole UTF-8 sequence, so no byte of a
+	# letter can be removed. A string holding none of the five lead-byte pairs
+	# skips the table entirely.
+	if (index(t, PLEADGEN) == 0 && index(t, PLEADCJK) == 0 && index(t, PLEADKANA) == 0 && index(t, PLEADFW1) == 0 && index(t, PLEADFW2) == 0) return t
+	for (i = 1; i <= PUNCTN; i++) if (index(t, PU[i])) gsub(PU[i], " ", t)
+	return t
+}
+
 function norm(s,   t) {
 	# Lowercase, punctuation to space, whitespace collapsed. Applied identically
 	# to both sides of every comparison, so the two stay commensurable.
-	t = foldcase(s)
+	t = cjkpunct(foldcase(s))
 	gsub(/[[:punct:]]/, " ", t)
 	gsub(/[ \t\r\n]+/, " ", t)
 	sub(/^ /, "", t)
@@ -237,10 +259,48 @@ function norm(s,   t) {
 	return t
 }
 
+function addbigrams(tok, arr,   i, n, b, clen, ch, prev) {
+	# Chinese and Japanese are written without spaces between words, so after
+	# norm() a whole clause is still one token and matches nothing but itself.
+	# Every pair of adjacent Han or kana characters is added as a token of its
+	# own: the conventional cheap answer, inside this seam, with no segmenter
+	# and no dependency. A two-character name such as `腾讯` is then a token of
+	# any sentence that contains it. A pair never spans a non-CJK character.
+	# Walked bytewise (the locale is C), one UTF-8 sequence at a time.
+	n = length(tok)
+	prev = ""
+	i = 1
+	while (i <= n) {
+		b = ORD[substr(tok, i, 1)]
+		clen = (b >= 240) ? 4 : (b >= 224) ? 3 : (b >= 192) ? 2 : 1
+		ch = substr(tok, i, clen)
+		if (clen == 3 && iscjk(b, ORD[substr(tok, i + 1, 1)])) {
+			if (prev != "") arr[prev ch] = 1
+			prev = ch
+		} else {
+			prev = ""
+		}
+		i += clen
+	}
+}
+
+function iscjk(b1, b2) {
+	# Lead and second byte of a three-byte UTF-8 sequence. Covered: Hiragana
+	# and Katakana (U+3040..U+30FF, E3 81..83), CJK Extension A (U+3400..U+4DBF,
+	# E3 90.. through E4 B6) and the CJK Unified Ideographs (U+4E00..U+9FFF,
+	# E4 B8 through E9). Hangul is not here: Korean is written with spaces.
+	if (b1 == 227) return (b2 >= 129 && b2 <= 131) || b2 >= 144
+	return b1 >= 228 && b1 <= 233
+}
+
 function addtokens(s, arr, minlen,   n, i, parts, tok) {
 	n = split(norm(s), parts, " ")
 	for (i = 1; i <= n; i++) {
 		tok = parts[i]
+		# The bigram fallback runs before the stoplist and the length minimum,
+		# which are written for whole words: a pair is six bytes, so it clears
+		# both minimums anyway, and no Chinese pair is on the stoplist.
+		if (index(tok, CJKLEAD1) || index(tok, CJKLEAD2) || index(tok, CJKLEAD3) || index(tok, CJKLEAD4) || index(tok, CJKLEAD5) || index(tok, CJKLEAD6) || index(tok, CJKLEAD7)) addbigrams(tok, arr)
 		if (length(tok) < minlen) continue
 		if (tok in STOP) continue
 		arr[tok] = 1
@@ -324,6 +384,29 @@ BEGIN {
 	foldrange(931, 937, 32)   # Greek Sigma .. Omega
 	foldrange(1024, 1039, 80) # Cyrillic Ie-grave .. Dzhe
 	foldrange(1040, 1071, 32) # Cyrillic A .. Ya
+
+	# The punctuation table cjkpunct() splits on, and the byte lookup the
+	# bigram walk uses. Lead-byte pairs first, for the cheap skip.
+	PLEADGEN = sprintf("%c%c", 226, 128)  # U+2000..U+203F
+	PLEADCJK = sprintf("%c%c", 227, 128)  # U+3000..U+303F
+	PLEADKANA = sprintf("%c%c", 227, 131) # U+30C0..U+30FF (middle dot)
+	PLEADFW1 = sprintf("%c%c", 239, 188)  # U+FF00..U+FF3F
+	PLEADFW2 = sprintf("%c%c", 239, 189)  # U+FF40..U+FF7F
+	punctrange(8208, 8231)    # General Punctuation: dashes, quotes, bullets, ellipsis
+	punctrange(12288, 12292)  # ideographic space, comma, full stop, ditto, JIS mark
+	punctrange(12296, 12320)  # CJK brackets, postal mark, wave dash, quotes
+	punctrange(12336, 12336)  # wavy dash
+	punctrange(12342, 12343)  # circled postal mark, ideographic telegraph line feed
+	punctrange(12349, 12351)  # part alternation mark, masu mark, half fill space
+	punctrange(12539, 12539)  # katakana middle dot
+	punctrange(65281, 65295)  # full-width ! .. /
+	punctrange(65306, 65312)  # full-width : .. @
+	punctrange(65339, 65344)  # full-width [ .. `
+	punctrange(65371, 65381)  # full-width { .. ~, half-width CJK punctuation
+	for (i = 1; i < 256; i++) ORD[sprintf("%c", i)] = i
+	CJKLEAD1 = sprintf("%c", 227); CJKLEAD2 = sprintf("%c", 228); CJKLEAD3 = sprintf("%c", 229)
+	CJKLEAD4 = sprintf("%c", 230); CJKLEAD5 = sprintf("%c", 231); CJKLEAD6 = sprintf("%c", 232)
+	CJKLEAD7 = sprintf("%c", 233)
 
 	# Function words and corporate suffixes. Dropping them keeps two entries from
 	# being joined by "with" or by "inc". The list is deliberately short: every

@@ -6,9 +6,15 @@ script is measured against. Do not read it as news, and do not cite it. The `sou
 links point at `example.com` for exactly that reason.
 
 **Reference date: 2026-08-26.** With the profile default of `ledger-window-days` 60,
-the window reaches back to 2026-06-27. The nine entries from that date onwards are
+the window reaches back to 2026-06-27. The eleven entries from that date onwards are
 inside the window and the four before it are outside, which is what makes this file
 usable for checking that the window binds.
+
+**Two entries are not in English**, on purpose: one in Russian (2026-08-14) and one in
+Chinese (2026-08-20). They keep the retriever's non-Latin handling under the same
+regression check as the rest — the in-script case folding a Cyrillic capital needs, the
+CJK punctuation that separates names, and the character-bigram fallback for Chinese and
+Japanese text written without spaces between words.
 
 A real ledger is written by the briefing agent, one entry appended per published
 item, oldest at the top. You are meant to be able to open it, read it and correct
@@ -96,10 +102,22 @@ the whole of the operation. The next run will treat that story as new.
   - section: AI-specific hardware
   - marker: new
 
+- **2026-08-14** — Яндекс открыл веса модели YandexGPT 5 для коммерческого использования.
+  - entities: яндекс, yandexgpt 5
+  - sources: https://newsroom.example.com/2026/08/yandexgpt-5-open-weights
+  - section: Generative models
+  - marker: new
+
 - **2026-08-18** — Mistral released a 3-billion-parameter on-device model under Apache 2.0 with published phone benchmarks.
   - entities: mistral
   - sources: https://newsroom.example.com/2026/08/mistral-3b-on-device
   - section: Small and on-device models
+  - marker: new
+
+- **2026-08-20** — 腾讯发布了混元（Hunyuan）大模型的开源权重，允许企业免费商用。
+  - entities: 腾讯, 混元, tencent, hunyuan
+  - sources: https://newsroom.example.com/2026/08/tencent-hunyuan-open-weights
+  - section: Generative models
   - marker: new
 
 - **2026-08-21** — Nvidia began sampling its Rubin Ultra accelerator to hyperscale customers ahead of a first-quarter shipping date.

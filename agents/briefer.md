@@ -50,7 +50,7 @@ briefing: <path to write the briefing to>
 sections:
 - heading: <profile section heading>
   slug: <the section's report slug>
-  outcome: succeeded | timed out | failed — exceeded its budget | failed
+  outcome: succeeded | timed out | failed — exceeded its budget | failed — not authenticated | failed — rate limited, over the usage limit, or out of credit | failed
   exit-code: <the section process's exit code>
   elapsed-minutes: <M>
   report: <path to the section report, or none>
@@ -206,7 +206,7 @@ Nothing new this morning. <!-- or the failure note for this section -->
 
 | Section | Outcome | Pages | Max hop | Minutes | Exit condition |
 |---|---|---|---|---|---|
-| <heading> | succeeded \| timed out \| failed — exceeded its budget \| failed | <N> | <H> | <E> | <condition> |
+| <heading> | <the `outcome:` value as given> | <N> | <H> | <E> | <condition> |
 
 ## Failure notes
 

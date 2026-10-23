@@ -10,10 +10,10 @@ decision. Returning entries that turn out not to match costs the judgement behin
 a few extra lines to read. Failing to return the true match costs a duplicate in the
 briefing, which is the failure these cases exist to catch.
 
-**The measurement.** Four candidates have a true match inside the window, namely
-cases 1, 2, 3 and 6. Every one of those four entries must appear in the output of its
-invocation. That is recall 1.0, and anything less is a defect to file rather than a
-number to accept. Case 4 has a true match that lies outside the window, and its
+**The measurement.** Nine candidates have a true match inside the window, namely
+cases 1, 2, 3, 6, 7, 8, 9, 10 and 11. Every one of those nine entries must appear in the
+output of its invocation. That is recall 1.0, and anything less is a defect to file
+rather than a number to accept. Case 4 has a true match that lies outside the window, and its
 expectation is the reverse: the entry must not appear. Case 5 has no true match at
 all.
 
@@ -124,3 +124,83 @@ The `entities` line is a retrieval aid, not the record. With it gone, the entry 
 still reachable because its names and its words are in its sentence, which is where
 the record actually lives. A user who tidies their ledger by hand loses some
 retrieval quality and loses nothing else.
+
+## Case 7: a Russian entry, reached with its `entities` line in place
+
+**Kind:** a non-Latin entry and a candidate in the same language, worded differently.
+
+- entities: `яндекс|yandexgpt`
+- text: `Яндекс выложил YandexGPT 5 в открытый доступ для бизнеса.`
+- **Expected match: the entry of 2026-08-14, actor Яндекс.**
+
+The baseline for the next case: the candidate's entity names are on the entry's
+`entities` line, so this case passes as long as Cyrillic bytes survive tokenising at
+all.
+
+## Case 8: the Russian entry with its `entities` line deleted
+
+**Kind:** a hand-edited ledger in a cased non-Latin script. This is the case that holds
+the in-script case folding in place.
+
+**Preparation.** Copy `example-ledger.md`, and in the copy delete the line
+`  - entities: яндекс, yandexgpt 5` from the entry of 2026-08-14. Run this case against
+the copy.
+
+- entities: `яндекс`
+- text: `Нейросеть Яндекса теперь можно скачать и запускать в продуктах компаний.`
+- **Expected match: the entry of 2026-08-14, actor Яндекс, still returned from the edited copy.**
+
+The candidate shares no content word with the entry's sentence (`Яндекса` is an
+inflected form, not the same token). The only route left is the entity `яндекс`
+against the capitalised `Яндекс` that opens the sentence, and that route exists only
+because the retriever folds Cyrillic case itself rather than borrowing it from a
+locale. Simplify `foldcase()` back to plain `tolower()` under the pinned C locale and
+this case fails.
+
+## Case 9: a Chinese entry, reached with its `entities` line in place
+
+**Kind:** a non-Latin entry written without spaces between words, and a candidate in
+the same language.
+
+- entities: `腾讯|混元`
+- text: `腾讯公开了混元模型的权重，企业可以免费用于商业产品。`
+- **Expected match: the entry of 2026-08-20, actor 腾讯 (Tencent).**
+
+The baseline for the next two cases: the names are on the `entities` line, which is
+written with ASCII commas, so each name is a token of its own.
+
+## Case 10: the Chinese entry with its `entities` line deleted
+
+**Kind:** a hand-edited ledger in a script without spaces between words. This is the
+case that holds the character-bigram fallback in place.
+
+**Preparation.** Copy `example-ledger.md`, and in the copy delete the line
+`  - entities: 腾讯, 混元, tencent, hunyuan` from the entry of 2026-08-20. Run this case
+against the copy.
+
+- entities: `腾讯|混元`
+- text: `企业现在可以免费商用腾讯的混元大模型。`
+- **Expected match: the entry of 2026-08-20, actor 腾讯 (Tencent), still returned from the edited copy.**
+
+A whitespace tokeniser reads each run of Chinese between punctuation marks as a single
+token, so the sentence opens with the one token `腾讯发布了混元`, and neither `腾讯` nor
+`混元` exists as a token of its own — not even once the punctuation is split. The
+retriever therefore also indexes every pair of adjacent Chinese or Japanese characters,
+and `腾讯` is such a pair. Remove that fallback and this case fails.
+
+## Case 11: an English candidate for the Chinese entry, `entities` line deleted
+
+**Kind:** a Latin name embedded in Chinese text between full-width punctuation. This is
+the case that holds the CJK punctuation split in place.
+
+**Preparation.** The same edited copy as case 10.
+
+- entities: `tencent|hunyuan`
+- text: `Tencent has released open weights for its Hunyuan large model, free for commercial use.`
+- **Expected match: the entry of 2026-08-20, actor 腾讯 (Tencent), still returned from the edited copy.**
+
+The entry's sentence never spells `Tencent`; it carries the model's Latin name,
+`Hunyuan`, between the full-width parentheses `（` and `）`, which are not ASCII
+punctuation. Unless the normaliser splits on the CJK and full-width punctuation
+blocks, `hunyuan` is glued to the Chinese around it and never becomes a token of its
+own. The bigram fallback does not help here, because `hunyuan` is not Chinese.

@@ -710,7 +710,24 @@ outcome_of() {
       # capitalised twin of every entry and cannot miss a third spelling.
       result="$(json_string_field result "$out" | LC_ALL=C tr 'A-Z' 'a-z')"
       case "$result" in
-        *"please run /login"* | *"not logged in"* | *"invalid api key"* | *401*)
+        # The auth alternatives of the shipped binary's own health-classifier
+        # regex (claude 2.1.246), each as a fixed substring, minus three groups
+        # that do not belong in this arm: `credit balance (is )too low` and
+        # `usage limit reached`, which the `limit` arm below carries because
+        # their remedy is to wait or add credit, not to log in; and the
+        # gh/gcloud/aws login prompts, which no step of a briefing calls.
+        # An MCP auth failure (the browser-use server under `depth: on`) is a
+        # broken host too, so it is `auth` here rather than a token of its own.
+        # `*401*` also covers `401 unauthorized`; `token expired` also covers
+        # `oauth token expired` and the MCP token-expired forms.
+        *"please run /login"* | *"not logged in"* | *"invalid api key"* | *401* | \
+        *"authentication failed"* | *"oauth token revoked"* | *"403 forbidden"* | \
+        *"token expired"* | *"token has expired"* | *"bad credentials"* | \
+        *"mcp auth"* | *"mcp server auth"* | *"mcp unauthorized"* | *"mcp server unauthorized"* | \
+        *"mcp credential missing"* | *"mcp credential expired"* | *"mcp credential invalid"* | \
+        *"mcp server credential missing"* | *"mcp server credential expired"* | *"mcp server credential invalid"* | \
+        *"mcp token missing"* | *"mcp token invalid"* | \
+        *"mcp server token missing"* | *"mcp server token invalid"*)
           printf 'auth\n'
           return 0 ;;
         # Markers of a host that cannot spend right now, which is one useful
@@ -879,7 +896,7 @@ while [ "$i" -lt "$SEC_COUNT" ]; do
 done
 
 if [ "$AUTH_FAILURES" -gt 0 ]; then
-  warn "scout brief: $AUTH_FAILURES of $SEC_COUNT $SEC_WORD could not authenticate. That is this host, not a quiet day: the briefing will be thin or empty for a reason that has nothing to do with the web. Run 'claude auth status' to see whether this machine is logged in."
+  warn "scout brief: $AUTH_FAILURES of $SEC_COUNT $SEC_WORD could not authenticate. That is this host, not a quiet day: the briefing will be thin or empty for a reason that has nothing to do with the web. Run 'claude auth status' to see whether this machine is logged in. If the profile sets depth: on and the host is logged in, the failing credential may be the browser-use MCP server's: re-run /scout:setup."
 fi
 if [ "$LIMIT_FAILURES" -gt 0 ]; then
   # Two endings, and the remedy has to name both. A rate or usage limit clears
