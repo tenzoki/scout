@@ -181,7 +181,7 @@ The script removes any existing user-scope `searxng`, adds it fresh under the **
 
 scout's agent definition grants the `Bash` tool, but it never needs arbitrary shell. This is everything it runs:
 
-- **Every run:** `date` (to stamp the report's date-time, sourced from the machine rather than guessed), `mkdir -p scout-workbench/research/` or the `REPORT DIR` folder (to create the report directory), and `pwd` (to report the report's absolute path back).
+- **Every run:** `printenv SCOUT_FILE_PREFIX` (to read the filename-prefix override, if one is set), `date` (to stamp the report's date-time, sourced from the machine rather than guessed), `mkdir -p scout-workbench/research/` or the `REPORT DIR` folder (to create the report directory), and `pwd` (to report the report's absolute path back).
 - **Briefing runs only** (`scout brief`): `date +%s` (to measure the time budget), the ledger retriever `briefing/ledger-retrieve.sh`, and `curl` (to fetch each host's `robots.txt`).
 
 Claude Code does **not** let a plugin ship a permission allowlist that binds a dispatched agent's own `Bash` calls — permission rules are read from the `settings.json` precedence chain in the directory where you launch `scout` (enterprise → `~/.claude/settings.json` → the project's `.claude/settings.json` → `.claude/settings.local.json`), not from anything inside `~/.scout`. So the scoping is something **you** add to the project (or your home) settings, and this skill recommends it rather than installing it.
@@ -192,6 +192,7 @@ To hold scout to the commands of a normal run, add this to your project's `.clau
 {
   "permissions": {
     "allow": [
+      "Bash(printenv SCOUT_FILE_PREFIX)",
       "Bash(date:*)",
       "Bash(mkdir:*)",
       "Bash(pwd)"
@@ -200,7 +201,7 @@ To hold scout to the commands of a normal run, add this to your project's `.clau
 }
 ```
 
-With this in place, scout's `date`, `mkdir` and `pwd` calls run without a prompt, and any other shell command (a `cat`, an `rm`) falls outside the allowlist — Claude Code prompts you before it runs, so nothing arbitrary executes silently. If briefings run under these settings, also allow `Bash(curl:*)` and the retriever. To make the boundary a hard wall, add a `deny` list as well (e.g. `"deny": ["Bash(rm:*)"]`), which Claude Code refuses outright. **Do not deny `curl` where briefings run:** scout then cannot read any host's `robots.txt`, so it fetches nothing from hosts it could not check and lists them in the report as blocked.
+With this in place, scout's `printenv SCOUT_FILE_PREFIX`, `date`, `mkdir` and `pwd` calls run without a prompt, and any other shell command (a `cat`, an `rm`) falls outside the allowlist — Claude Code prompts you before it runs, so nothing arbitrary executes silently. If briefings run under these settings, also allow `Bash(curl:*)` and the retriever. To make the boundary a hard wall, add a `deny` list as well (e.g. `"deny": ["Bash(rm:*)"]`), which Claude Code refuses outright. **Do not deny `curl` where briefings run:** scout then cannot read any host's `robots.txt`, so it fetches nothing from hosts it could not check and lists them in the report as blocked.
 
 **Known gap, stated plainly:** without this snippet, scout still only *calls* the commands above — but Claude Code may prompt you to approve a broader `Bash` permission, and approving it grants more than scout uses. The allowlist is the way to keep scout's shell access scoped to the commands it actually runs. This is a recommendation, not an automatic install, because no plugin-level mechanism can apply it for you.
 

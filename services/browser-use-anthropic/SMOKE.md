@@ -59,6 +59,12 @@ Confirm:
 
 Stop the process (Ctrl-C) once it has come up cleanly.
 
+Optional: repeat the launch with `SCOUT_DEPTH_EXTRACT_TEMPERATURE=2` added. The
+server still comes up, and stderr carries
+`scout-browseruse-anthropic: SCOUT_DEPTH_EXTRACT_TEMPERATURE='2' is not a number in [0, 1]; using 0.`
+That confirms an invalid value falls back to the default visibly rather than
+being passed to Anthropic.
+
 ## 3. Register, then drive a real extraction
 
 Register the depth layer through the normal path:

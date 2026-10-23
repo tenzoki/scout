@@ -23,6 +23,12 @@ Environment:
                                value (e.g. openai) = pass-through to stock
                                OpenAI behaviour, no patch installed.
     SCOUT_DEPTH_EXTRACT_MODEL  extraction model id (default claude-3-5-haiku-latest).
+    SCOUT_DEPTH_EXTRACT_TEMPERATURE
+                               extraction temperature, a number in [0, 1]
+                               (default 0: extraction is a near-deterministic
+                               read-back of page text, not generation). An
+                               unparseable or out-of-range value falls back to 0
+                               with a note on stderr.
     ANTHROPIC_API_KEY          read by the Anthropic SDK / passed explicitly.
 
 Pin discipline: a browser-use bump is a deliberate, tested change. The shim
@@ -89,6 +95,37 @@ def _resolve():
     return server, ChatAnthropic
 
 
+# Extraction is a near-deterministic read-back of page text, not generation:
+# temperature 0 keeps a long, dense filing from making the model wander or
+# under-return. (Stock's fallback is 0.7; scout chose 0 on purpose in 7006b63.)
+DEFAULT_EXTRACT_TEMPERATURE = 0.0
+
+
+def _extract_temperature() -> float:
+    """Read SCOUT_DEPTH_EXTRACT_TEMPERATURE as a float in [0, 1].
+
+    Unset or empty means the default. A value that is not a number, or lies
+    outside [0, 1], is not silently used: the default applies and stderr says
+    which value was refused, so a typo is visible in the MCP server log.
+    """
+    raw = os.getenv("SCOUT_DEPTH_EXTRACT_TEMPERATURE", "").strip()
+    if not raw:
+        return DEFAULT_EXTRACT_TEMPERATURE
+    try:
+        value = float(raw)
+    except ValueError:
+        value = None
+    # `value == value` rejects NaN, which float() accepts.
+    if value is None or value != value or not 0.0 <= value <= 1.0:
+        print(
+            f"scout-browseruse-anthropic: SCOUT_DEPTH_EXTRACT_TEMPERATURE={raw!r} "
+            f"is not a number in [0, 1]; using {DEFAULT_EXTRACT_TEMPERATURE:g}.",
+            file=sys.stderr,
+        )
+        return DEFAULT_EXTRACT_TEMPERATURE
+    return value
+
+
 def _install_anthropic_patch(server, ChatAnthropic) -> None:
     """Wrap _init_browser_session so self.llm is an Anthropic extraction model.
 
@@ -99,6 +136,7 @@ def _install_anthropic_patch(server, ChatAnthropic) -> None:
     hit the 'LLM not initialized' guard.
     """
     model = os.getenv("SCOUT_DEPTH_EXTRACT_MODEL", "claude-3-5-haiku-latest")
+    temperature = _extract_temperature()
     stock_init = server.BrowserUseServer._init_browser_session
 
     @functools.wraps(stock_init)
@@ -110,10 +148,7 @@ def _install_anthropic_patch(server, ChatAnthropic) -> None:
         self.llm = ChatAnthropic(
             model=model,
             api_key=os.getenv("ANTHROPIC_API_KEY"),
-            # Extraction is a near-deterministic read-back of page text, not
-            # generation: temperature 0 keeps a long, dense filing from making
-            # the model wander or under-return. (Was 0.7.)
-            temperature=0,
+            temperature=temperature,
         )
 
     server.BrowserUseServer._init_browser_session = _patched_init

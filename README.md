@@ -247,13 +247,13 @@ The report then lands at `<path>/<prefix>-<topic>.md`, and scout creates that fo
 
 scout accepts the value only if it is non-empty, relative (no leading `/` or `~`), uses only `A–Z a–z 0–9 . _ - /`, and no `/`-separated part of it starts with `-` or `.`. That last rule rules out `..`, a value `mkdir` would read as an option, and dot-folders such as `.claude/commands` or `.git`. `flight-workbench/research` and `fusion-workbench/shared/research` are valid. A value that breaks a rule is not repaired: scout writes to the default folder and says in its summary that the `REPORT DIR` value was rejected and why. In a briefing run (`scout brief`) the line is ignored, because the briefing locates its section reports under `scout-workbench/research/`.
 
-The `<prefix>` is a date-time stamp. The default renders as `YYYY-MM-DD_HH-MM` (e.g. `2026-06-14_13-45`). You can override it by setting the environment variable `SCOUT_FILE_PREFIX` to a `date(1)` strftime string — e.g. `export SCOUT_FILE_PREFIX='%Y%m%d-%H%M%S'` for full-year + seconds precision. Default keeps existing reports sorting consistently; change it only on a clean project.
+The `<prefix>` is a date-time stamp. The default renders as `YYYY-MM-DD_HH-MM` (e.g. `2026-06-14_13-45`). You can override it by setting the environment variable `SCOUT_FILE_PREFIX` to a `date(1)` strftime string — e.g. `export SCOUT_FILE_PREFIX='%Y%m%d-%H%M%S'` for full-year + seconds precision. scout reads the variable with `printenv SCOUT_FILE_PREFIX` and then runs `date +'<format>'`; neither command contains a shell expansion, so the override is not lost to a permission check or a simplified command. A format containing a `'` is not used: scout falls back to the default and says so in the report's summary. Default keeps existing reports sorting consistently; change it only on a clean project.
 
 ### scout's shell access (and how to scope it)
 
 scout's agent definition grants Claude Code's built-in `Bash` tool — it is **not** an agent-dispatch tool, and scout stays single-agent. This is everything scout runs with it:
 
-- **Every run:** `date` (to stamp the report's date-time from the machine instead of guessing), `mkdir -p scout-workbench/research/` or the `REPORT DIR` folder (to create the report directory), and `pwd` (to report the report's absolute path back).
+- **Every run:** `printenv SCOUT_FILE_PREFIX` (to read your filename-prefix override, if you set one), `date` (to stamp the report's date-time from the machine instead of guessing), `mkdir -p scout-workbench/research/` or the `REPORT DIR` folder (to create the report directory), and `pwd` (to report the report's absolute path back).
 - **Briefing runs only** (`scout brief`): `date +%s` (to measure the time budget), the ledger retriever `briefing/ledger-retrieve.sh` (to check what was already reported), and `curl` (to fetch each host's `robots.txt`).
 
 A plugin cannot ship a permission rule that binds its agent's own `Bash` calls — Claude Code reads permissions from the `settings.json` in the directory where you launch `scout` (and `~/.claude/settings.json`), not from `~/.scout`. To hold scout to the commands of a normal run, add this to your project's `.claude/settings.json` (or `~/.claude/settings.json` for every project):
@@ -262,6 +262,7 @@ A plugin cannot ship a permission rule that binds its agent's own `Bash` calls �
 {
   "permissions": {
     "allow": [
+      "Bash(printenv SCOUT_FILE_PREFIX)",
       "Bash(date:*)",
       "Bash(mkdir:*)",
       "Bash(pwd)"
@@ -370,7 +371,7 @@ The launcher hands the orchestrator's exit code straight through to whatever sta
 | `2` | The run stopped before a briefing was possible — a bad argument, an unusable profile, a missing script | Fix the invocation or the profile; retrying unchanged will fail the same way. |
 | `3` | Windows only: `scout brief` refused (see below) | Run it under WSL or Git Bash instead. |
 
-Per-section outcomes never change the exit code. A run whose every section failed still merges, still writes a briefing and **still exits 0** — the per-section verdicts (`succeeded`, `timed out`, `failed`, `failed — exceeded its budget`) are in the briefing's run-figures table and failure notes, and a wrapper that wants to act on them reads the file.
+Per-section outcomes never change the exit code. A run whose every section failed still merges, still writes a briefing and **still exits 0** — the per-section verdicts (`succeeded`, `timed out`, `failed — exceeded its budget`, `failed — not authenticated`, `failed — rate limited, over the usage limit, or out of credit`, `failed`) are in the briefing's run-figures table and failure notes, and a wrapper that wants to act on them reads the file.
 
 ### Windows
 
@@ -486,7 +487,7 @@ Then add this to your Claude Code MCP settings, with `<state dir>` replaced by t
 }
 ```
 
-The pin is `0.11.9` — the version scout's depth layer is built and verified against. A version bump is a deliberate, tested change, not an automatic track. The `--from "browser-use[cli]@0.11.9" python <shim>` form runs the exact tested browser-use, but launches scout's thin shim inside that environment so extraction lands on Anthropic. Both no-cloud env vars stay in this snippet — keep them in every one. (`SCOUT_DEPTH_EXTRACT_MODEL` is optional; it overrides the default `claude-3-5-haiku-latest` extraction model.)
+The pin is `0.11.9` — the version scout's depth layer is built and verified against. A version bump is a deliberate, tested change, not an automatic track. The `--from "browser-use[cli]@0.11.9" python <shim>` form runs the exact tested browser-use, but launches scout's thin shim inside that environment so extraction lands on Anthropic. Both no-cloud env vars stay in this snippet — keep them in every one. (`SCOUT_DEPTH_EXTRACT_MODEL` is optional; it overrides the default `claude-3-5-haiku-latest` extraction model. `SCOUT_DEPTH_EXTRACT_TEMPERATURE` is optional too: a number in `[0, 1]`, default `0`, because extraction reads page text back rather than generating it. The shim ignores any other value with a note on stderr. `register-browser-use.sh` forwards either variable into the registration when it is set in its environment.)
 
 ### Both no-cloud environment variables are mandatory
 
@@ -494,7 +495,7 @@ The pin is `0.11.9` — the version scout's depth layer is built and verified ag
 
 ### You need your own Anthropic API key
 
-The depth layer's main LLM-using tool, `browser_extract_content` (turn a page into structured text), calls an LLM, and you supply the key via `ANTHROPIC_API_KEY`. Stock browser-use `0.11.9` hardwires that extraction call to OpenAI at the MCP layer. scout ships a small runtime shim (`services/browser-use-anthropic/scout_browseruse_anthropic.py`) that rebinds the extraction LLM to Anthropic, so a fast Claude model (`claude-3-5-haiku-latest` by default) handles extraction and you need only an Anthropic key. Override the model with `SCOUT_DEPTH_EXTRACT_MODEL`.
+The depth layer's main LLM-using tool, `browser_extract_content` (turn a page into structured text), calls an LLM, and you supply the key via `ANTHROPIC_API_KEY`. Stock browser-use `0.11.9` hardwires that extraction call to OpenAI at the MCP layer. scout ships a small runtime shim (`services/browser-use-anthropic/scout_browseruse_anthropic.py`) that rebinds the extraction LLM to Anthropic, so a fast Claude model (`claude-3-5-haiku-latest` by default) handles extraction and you need only an Anthropic key. Override the model with `SCOUT_DEPTH_EXTRACT_MODEL` and the extraction temperature (default `0`) with `SCOUT_DEPTH_EXTRACT_TEMPERATURE`.
 
 The shim patches **extraction only**. The last-resort internal loop, `retry_with_browser_use_agent`, stays OpenAI/Bedrock-only upstream; if you reach for it you still need an OpenAI or Bedrock key.
 

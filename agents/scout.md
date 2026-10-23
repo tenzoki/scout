@@ -16,7 +16,7 @@ tools: Bash, WebSearch, WebFetch, Read, Write, mcp__searxng__searxng_web_search,
 
   `Bash` in the `tools:` list is likewise NOT an agent-dispatch tool — it is a
   Claude Code built-in that runs shell commands in this one process. scout's
-  whole shell surface: `date`, `mkdir -p` and `pwd` on every run; in briefing
+  whole shell surface: `printenv SCOUT_FILE_PREFIX`, `date`, `mkdir -p` and `pwd` on every run; in briefing
   mode also `date +%s`, the ledger retriever and `curl` for `robots.txt`. Keep
   README.md and skills/setup/SKILL.md in step if this list changes. It cannot
   spawn a sub-agent, so depth-one still holds with `Bash` present.
@@ -131,11 +131,13 @@ When you hit a wall on an **essential** source that none of the above clears, do
 
 ## Timestamps — always from `date`, never guessed
 
-**Every timestamp MUST come from actually running `date` via the `Bash` tool.** You have `Bash` for exactly this (and for the `mkdir -p` and `pwd` below, plus the briefing-mode commands) — run the command and use its output verbatim. Do not guess, do not skip it, and never add a "time not machine-sourced" note: the shell is available, so source the time from it. Your internal clock runs in UTC and will be wrong by the local offset (in Central European Summer Time, about two hours behind local time), which is the whole reason `date` is mandatory. This applies to the filename prefix *and* to the `**Date:**` line inside the report.
+**Every timestamp MUST come from actually running `date` via the `Bash` tool.** You have `Bash` for exactly this (and for the `printenv SCOUT_FILE_PREFIX`, `mkdir -p` and `pwd` below, plus the briefing-mode commands) — run the command and use its output verbatim. Do not guess, do not skip it, and never add a "time not machine-sourced" note: the shell is available, so source the time from it. Your internal clock runs in UTC and will be wrong by the local offset (in Central European Summer Time, about two hours behind local time), which is the whole reason `date` is mandatory. This applies to the filename prefix *and* to the `**Date:**` line inside the report.
 
-- Filename prefix: run `date +"${SCOUT_FILE_PREFIX:-%Y-%m-%d_%H-%M}"` and use exactly its output. Never hard-code or guess the format or the value.
-  - The prefix **always carries the time component**. A *conforming* filename looks like `2026-06-18_14-30-palantir-sap-fy2025-revenue.md` — the `YYYY-MM-DD_HH-MM` prefix, then `-`, then the kebab topic slug (the `<prefix>-<topic>.md` pattern below).
-  - A *date-only* name like `2026-06-18-palantir-sap-fy2025-revenue.md` (no `_HH-MM`) is **non-conforming**: it is the signature of having skipped `date`. If you ever find yourself about to write a date-only prefix, that is the bug — you did not run `date`. Run `date +"${SCOUT_FILE_PREFIX:-%Y-%m-%d_%H-%M}"` and use its output. This is the same prefix format already specified here; do not introduce a second format and do not substitute a literal timestamp. The `SCOUT_FILE_PREFIX` override stays the only way to change it.
+- Filename prefix: two commands, in this order, every run. Neither contains a `$`, so there is nothing to simplify away and nothing a permission check refuses as an expansion.
+  1. Run `printenv SCOUT_FILE_PREFIX`. It prints the operator's prefix format, or nothing (exit 1) when none is set. Run it even when you expect it to be unset: that output, not your expectation, decides the format.
+  2. If step 1 printed a non-empty line, that line is the format; otherwise the format is `%Y-%m-%d_%H-%M`. Run `date +'<format>'` with the format single-quoted, and use exactly its output as the prefix. A printed format containing a `'` cannot be quoted safely: use `%Y-%m-%d_%H-%M` instead and say so in `## Summary`.
+  - The default prefix **always carries the time component**. A *conforming* default filename looks like `2026-06-18_14-30-palantir-sap-fy2025-revenue.md` — the `YYYY-MM-DD_HH-MM` prefix, then `-`, then the kebab topic slug (the `<prefix>-<topic>.md` pattern below).
+  - Two signatures are **non-conforming**, and each is the bug, not a shortcut. A *date-only* name like `2026-06-18-palantir-sap-fy2025-revenue.md` (no `_HH-MM`) means you skipped `date`. A `date` call with no `printenv SCOUT_FILE_PREFIX` before it means you guessed the format and would have dropped the operator's override. Never hard-code, guess or inline the format or the value; `SCOUT_FILE_PREFIX` stays the only way to change it.
 - In-report date: run `date +"%Y-%m-%d %H:%M"` and use exactly its output — both the date and the time.
 
 ## Write boundary — exactly one report file per run
@@ -372,9 +374,9 @@ The exit condition must agree with the figures beside it: `cap reached: pages` w
 
 `Entities` is the same list you passed to the retriever, carried forward so the briefing layer reuses this run's normalisation instead of redoing it. `Reached from` is mandatory for **every page reached by following a link** and is omitted only for a seed or a search result, which are hop 0 and reached from nothing.
 
-**One narrowing of the report filename.** In briefing mode, and only in briefing mode, the `<topic>` half of the path is the directive's `report-slug`, used **verbatim** — do not re-slug the question. The prefix half is untouched: `date +"${SCOUT_FILE_PREFIX:-%Y-%m-%d_%H-%M}"` exactly as the Timestamps section above specifies, and the directive has no say over it. Everything else about the write boundary holds unchanged — one file per run, the bare relative path, `mkdir -p scout-workbench/research/`, no absolute base. The result is `scout-workbench/research/<prefix>-<report-slug>.md`, which the caller locates by its `-<report-slug>.md` ending alone.
+**One narrowing of the report filename.** In briefing mode, and only in briefing mode, the `<topic>` half of the path is the directive's `report-slug`, used **verbatim** — do not re-slug the question. The prefix half is untouched: `printenv SCOUT_FILE_PREFIX`, then `date +'<format>'`, exactly as the Timestamps section above specifies, and the directive has no say over it. Everything else about the write boundary holds unchanged — one file per run, the bare relative path, `mkdir -p scout-workbench/research/`, no absolute base. The result is `scout-workbench/research/<prefix>-<report-slug>.md`, which the caller locates by its `-<report-slug>.md` ending alone.
 
-**Briefing mode adds no tool and no dispatch.** It uses `Bash` for `date +%s`, for the retriever and for `curl`-ing `robots.txt` — shell commands in this one process, exactly like the `date`, `mkdir -p` and `pwd` the run already relies on. It never dispatches a sub-agent, and it never needs to. The depth-one invariant at the top of this file holds unchanged.
+**Briefing mode adds no tool and no dispatch.** It uses `Bash` for `date +%s`, for the retriever and for `curl`-ing `robots.txt` — shell commands in this one process, exactly like the `printenv`, `date`, `mkdir -p` and `pwd` the run already relies on. It never dispatches a sub-agent, and it never needs to. The depth-one invariant at the top of this file holds unchanged.
 
 <!-- ── END BRIEFING MODE ── the sections below apply to every run again. -->
 

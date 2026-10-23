@@ -136,12 +136,30 @@ if [ "$INHERIT" -eq 1 ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
   } >&2
 fi
 
-# Optional non-default extraction model. It is spliced into a JSON string in
-# inherit mode, so the characters that would break that string are refused.
+# Optional extraction overrides, forwarded into the registration only when set.
+# They are spliced into a JSON string in inherit mode, so the characters that
+# would break that string are refused. The shim itself range-checks the
+# temperature ([0, 1]); here it only has to be number-shaped.
 MODEL="${SCOUT_DEPTH_EXTRACT_MODEL:-}"
 case "$MODEL" in
   *'"'*|*'\'*) echo "Stopping: SCOUT_DEPTH_EXTRACT_MODEL contains a \" or \\; a model name never does." >&2; exit 1 ;;
 esac
+TEMPERATURE="${SCOUT_DEPTH_EXTRACT_TEMPERATURE:-}"
+case "$TEMPERATURE" in
+  *[!0-9.]*) echo "Stopping: SCOUT_DEPTH_EXTRACT_TEMPERATURE must be a number in [0, 1], got '$TEMPERATURE'." >&2; exit 1 ;;
+esac
+# The same overrides in the two shapes the two registration forms take: a JSON
+# fragment (inherit) and `-e NAME=value` flags (pinned key).
+OPT_JSON=""
+OPT_FLAGS=()
+if [ -n "$MODEL" ]; then
+  OPT_JSON="$OPT_JSON\"SCOUT_DEPTH_EXTRACT_MODEL\": \"$MODEL\", "
+  OPT_FLAGS+=(-e "SCOUT_DEPTH_EXTRACT_MODEL=$MODEL")
+fi
+if [ -n "$TEMPERATURE" ]; then
+  OPT_JSON="$OPT_JSON\"SCOUT_DEPTH_EXTRACT_TEMPERATURE\": \"$TEMPERATURE\", "
+  OPT_FLAGS+=(-e "SCOUT_DEPTH_EXTRACT_TEMPERATURE=$TEMPERATURE")
+fi
 
 echo
 echo "== copy shim to the state directory =="
@@ -183,11 +201,7 @@ if [ "$INHERIT" -eq 1 ]; then
   # No ANTHROPIC_API_KEY entry: the running session inherits it from the
   # environment. The shim still runs (SCOUT_DEPTH_PROVIDER=anthropic) and both
   # no-cloud env vars are passed.
-  if [ -n "$MODEL" ]; then
-    claude mcp add-json browser-use -s user '{ "type": "stdio", "command": "uvx", "args": ["--from", "'"$PIN"'", "python", "'"$SHIM_PATH"'", "--mcp"], "env": { "SCOUT_DEPTH_PROVIDER": "anthropic", "SCOUT_DEPTH_EXTRACT_MODEL": "'"$MODEL"'", "ANONYMIZED_TELEMETRY": "False", "BROWSER_USE_VERSION_CHECK": "false" } }' || add_failed
-  else
-    claude mcp add-json browser-use -s user '{ "type": "stdio", "command": "uvx", "args": ["--from", "'"$PIN"'", "python", "'"$SHIM_PATH"'", "--mcp"], "env": { "SCOUT_DEPTH_PROVIDER": "anthropic", "ANONYMIZED_TELEMETRY": "False", "BROWSER_USE_VERSION_CHECK": "false" } }' || add_failed
-  fi
+  claude mcp add-json browser-use -s user '{ "type": "stdio", "command": "uvx", "args": ["--from", "'"$PIN"'", "python", "'"$SHIM_PATH"'", "--mcp"], "env": { "SCOUT_DEPTH_PROVIDER": "anthropic", '"$OPT_JSON"'"ANONYMIZED_TELEMETRY": "False", "BROWSER_USE_VERSION_CHECK": "false" } }' || add_failed
   # Inherit-mode runtime contract: the key is read from the launching shell's
   # environment when the MCP server starts, not from this config. Say so plainly
   # so a green registration is not mistaken for a working depth layer.
@@ -202,11 +216,8 @@ if [ "$INHERIT" -eq 1 ]; then
 else
   # Flag form keeps the key out of a JSON blob and matches the skill's documented
   # mechanism. The shim runs inside the pinned browser-use env via `--from`.
-  if [ -n "$MODEL" ]; then
-    claude mcp add browser-use uvx -s user -e ANTHROPIC_API_KEY="$KEY" -e SCOUT_DEPTH_PROVIDER=anthropic -e SCOUT_DEPTH_EXTRACT_MODEL="$MODEL" -e ANONYMIZED_TELEMETRY=False -e BROWSER_USE_VERSION_CHECK=false -- --from "$PIN" python "$SHIM_PATH" --mcp || add_failed
-  else
-    claude mcp add browser-use uvx -s user -e ANTHROPIC_API_KEY="$KEY" -e SCOUT_DEPTH_PROVIDER=anthropic -e ANONYMIZED_TELEMETRY=False -e BROWSER_USE_VERSION_CHECK=false -- --from "$PIN" python "$SHIM_PATH" --mcp || add_failed
-  fi
+  # `${OPT_FLAGS[@]+...}` keeps an empty array from tripping `set -u` on bash 3.2.
+  claude mcp add browser-use uvx -s user -e ANTHROPIC_API_KEY="$KEY" -e SCOUT_DEPTH_PROVIDER=anthropic ${OPT_FLAGS[@]+"${OPT_FLAGS[@]}"} -e ANONYMIZED_TELEMETRY=False -e BROWSER_USE_VERSION_CHECK=false -- --from "$PIN" python "$SHIM_PATH" --mcp || add_failed
 fi
 
 echo
