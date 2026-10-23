@@ -33,11 +33,14 @@ Environment:
                                applies (some models reject non-default
                                sampling values). An override must be a model
                                whose reply starts with a text block (e.g.
-                               claude-haiku-4-5, or a claude-sonnet model
-                               without extended thinking): browser-use
-                               0.11.9's extraction reads only the first
-                               content block, so a model that thinks by
-                               default returns its thinking block instead.
+                               claude-haiku-4-5): browser-use 0.11.9's
+                               extraction reads only the first content
+                               block, so a model that thinks by default
+                               returns its thinking block instead. Current
+                               models that think by default (e.g. the
+                               Sonnet 5 family) are unsuitable, because
+                               browser-use 0.11.9's ChatAnthropic has no
+                               way to turn thinking off.
                                An unparseable or out-of-range value is treated
                                as unset, with a note on stderr.
     ANTHROPIC_API_KEY          read by the Anthropic SDK / passed explicitly.
