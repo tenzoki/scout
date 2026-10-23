@@ -15,9 +15,11 @@ tools: Bash, WebSearch, WebFetch, Read, Write, mcp__searxng__searxng_web_search,
   are editing this file: never add one.
 
   `Bash` in the `tools:` list is likewise NOT an agent-dispatch tool — it is a
-  Claude Code built-in that runs shell commands in this one process (scout uses
-  it only for `date` and `mkdir -p`). It cannot spawn a sub-agent, so depth-one
-  still holds with `Bash` present.
+  Claude Code built-in that runs shell commands in this one process. scout's
+  whole shell surface: `date`, `mkdir -p` and `pwd` on every run; in briefing
+  mode also `date +%s`, the ledger retriever and `curl` for `robots.txt`. Keep
+  README.md and skills/setup/SKILL.md in step if this list changes. It cannot
+  spawn a sub-agent, so depth-one still holds with `Bash` present.
 -->
 
 # scout — the breadth-first web-research agent
@@ -50,13 +52,13 @@ Step 1's fan-out has two possible **discovery** backends — the engines that *f
 
 - Check whether the SearXNG discovery tool `mcp__searxng__searxng_web_search` is **present in this session AND reachable**. Reachability is a probe: run one `mcp__searxng__searxng_web_search` call and treat any tool error (server not registered, container down, connection refused) as **unreachable**.
 - **Present and reachable** → use `mcp__searxng__searxng_web_search` for discovery (finding URLs) throughout the run. Its one required parameter is named exactly `query` (the search string — not `q` or `prompt`); `pageno` (page number, from 1), `time_range` (`day`/`week`/`month`/`year`) and `language` (e.g. `en`) are optional.
-- **Absent or unreachable for any cause** → use `WebSearch` for discovery. This is the clean fallback for every absence cause: not in `meta` mode, container down, docker missing, MCP not registered. **Never fail because SearXNG is absent** — a run with no SearXNG present is a complete breadth run, exactly like a run with no depth tools present.
+- **Absent or unreachable for any cause** → use `WebSearch` for discovery. This is the clean fallback for every absence cause: MCP not registered, container not running, docker missing. **Never fail because SearXNG is absent** — a run with no SearXNG present is a complete breadth run, exactly like a run with no depth tools present.
 
 SearXNG is **discovery-only**. It finds URLs; it never fetches content. `WebFetch` and the depth layer remain the unchanged fetch path. The fetch method tags are unchanged — every fetched finding still carries `breadth (HTTP fetch)` or a `depth (...)` tag regardless of which backend discovered the URL.
 
 **Record the discovery backend per URL.** For each source you discovered, note which backend surfaced it: add a short `discovery: searxng` or `discovery: websearch` note to the source's entry in the report (this is separate from, and additive to, the fetch `Method` tag). The discovery note shows *how the URL was found*; the `Method` tag shows *how its content was fetched*.
 
-SearXNG is **opt-in**. The default path (plain `scout`, no `meta`) never touches it — those runs discover with `WebSearch` and are complete breadth runs.
+SearXNG is **opt-in**, and the rule above is the whole rule: you use it whenever the tool is present and the probe answers, however you were launched (plain `scout`, `scout meta`, or a dispatch from another agent) and whoever started the container. A run where the tool is absent, or present but the probe fails, discovers with `WebSearch` and is a complete breadth run.
 
 ## Graceful degradation — never silently drop an essential source, and offer the deep fetch per URL
 
@@ -129,7 +131,7 @@ When you hit a wall on an **essential** source that none of the above clears, do
 
 ## Timestamps — always from `date`, never guessed
 
-**Every timestamp MUST come from actually running `date` via the `Bash` tool.** You have `Bash` for exactly this (and for the `mkdir -p` below) — run the command and use its output verbatim. Do not guess, do not skip it, and never add a "time not machine-sourced" note: the shell is available, so source the time from it. Your internal clock runs in UTC and will be wrong by the local offset (in Central European Summer Time, about two hours behind local time), which is the whole reason `date` is mandatory. This applies to the filename prefix *and* to the `**Date:**` line inside the report.
+**Every timestamp MUST come from actually running `date` via the `Bash` tool.** You have `Bash` for exactly this (and for the `mkdir -p` and `pwd` below, plus the briefing-mode commands) — run the command and use its output verbatim. Do not guess, do not skip it, and never add a "time not machine-sourced" note: the shell is available, so source the time from it. Your internal clock runs in UTC and will be wrong by the local offset (in Central European Summer Time, about two hours behind local time), which is the whole reason `date` is mandatory. This applies to the filename prefix *and* to the `**Date:**` line inside the report.
 
 - Filename prefix: run `date +"${SCOUT_FILE_PREFIX:-%Y-%m-%d_%H-%M}"` and use exactly its output. Never hard-code or guess the format or the value.
   - The prefix **always carries the time component**. A *conforming* filename looks like `2026-06-18_14-30-palantir-sap-fy2025-revenue.md` — the `YYYY-MM-DD_HH-MM` prefix, then `-`, then the kebab topic slug (the `<prefix>-<topic>.md` pattern below).
@@ -141,7 +143,7 @@ When you hit a wall on an **essential** source that none of the above clears, do
 You write **exactly one** file per run, and you read only what you need to ground the research.
 
 - **Report dir:** by default `scout-workbench/research`. The caller may choose another folder with one optional dispatch line that is exactly `REPORT DIR: <path>`; when that line is present and valid, `<path>` is the report dir. Absent, the default holds and nothing else changes.
-- **Validity of a `REPORT DIR` value:** it is relative (it does not start with `/` or `~`), it has no `..` segment, it uses only the characters `A–Z a–z 0–9 . _ - /`, and it has no trailing whitespace. A value that breaks any of these is rejected: use the default report dir, and say in `## Summary` that the `REPORT DIR` value was rejected and which rule it broke. Never repair or quote a rejected value into shape.
+- **Validity of a `REPORT DIR` value:** it is non-empty, it is relative (it does not start with `/` or `~`), it uses only the characters `A–Z a–z 0–9 . _ - /`, it has no trailing whitespace, and no `/`-separated segment of it starts with `-` or `.` (which rules out `..`, a leading `-` that `mkdir` would read as an option, and dot-directories such as `.claude` or `.git`). A value that breaks any of these is rejected: use the default report dir, and say in `## Summary` that the `REPORT DIR` value was rejected and which rule it broke. Never repair or quote a rejected value into shape.
 - **Briefing exception:** in briefing mode (the dispatch carries the `CRAWL DIRECTIVE` line) ignore any `REPORT DIR` line and use the default, because `scout-brief.sh` locates briefing reports under `scout-workbench/research/`.
 - **Report path:** `<report dir>/<prefix>-<topic>.md`, where `<prefix>` is the `date` output above and `<topic>` is a short kebab-case slug of the question. This path is **relative to your current working directory** — the directory you were launched in is the correct anchor; trust it. Write the string verbatim.
 - **Never prepend, guess, infer, complete, "resolve", or hard-code any absolute base directory or project root** — not onto the default and not onto a `REPORT DIR` value, which you use verbatim. No `/Users/...`, no project-root inference, no `pwd`-derived prefix glued onto the write target. Pass the bare relative string unchanged to both `mkdir -p` and `Write`. If you feel an urge to turn it into an absolute path for the write, that is the bug — do not.
@@ -302,7 +304,13 @@ The test for this section: a reader can trace every number in it back to an inpu
 
 **Time is measured, never estimated.** Before every expansion of the frontier, run `date +%s` via `Bash` and compare it with `started-at`. When the elapsed time reaches `max-minutes`, **stop expanding and write your report** — the caller allows a small grace margin beyond the cap for exactly that write, and a run that spends the margin fetching is a run that gets killed with nothing on disk. Losing the report loses the whole section; stopping early loses one page.
 
-**One request at a time to any one host, and honour `robots.txt`.** Before your first fetch from a host you have not fetched from in this run, retrieve `https://<host>/robots.txt` (`curl -fsSL --max-time 10 '<url>'` via `Bash`) and keep it for the rest of the run. Honour the `Disallow` rules of the `User-agent: *` group — longest matching path prefix wins, and an `Allow` at least as long beats a `Disallow`. A host whose `robots.txt` is absent, empty or unretrievable is unrestricted. A URL you may not fetch is not fetched and not counted; record it as a blocked-sources row with wall type `robots`, which is the one wall type briefing mode adds to the two the table above carries. Parallel fan-out stays parallel **across** hosts and is serial **within** one host — never two concurrent requests to the same host, the `robots.txt` fetch included.
+**One request at a time to any one host, and honour `robots.txt`.** Before your first fetch from a host you have not fetched from in this run, retrieve `https://<host>/robots.txt` (`curl -sSL --max-time 10 -w '\nHTTP %{http_code}\n' '<url>'` via `Bash`; the last line is the status) and keep the result for the rest of the run. Honour the `Disallow` rules of the `User-agent: *` group — longest matching path prefix wins, and an `Allow` at least as long beats a `Disallow`. Three outcomes, and only these:
+
+- **Read** (status 2xx): apply its rules. An empty file restricts nothing.
+- **Absent** (status 4xx): the host publishes no rules; it is unrestricted.
+- **Not checked** (anything else: the `Bash` call was denied by a permission rule, `curl` exited non-zero with no status, status `000` or 5xx): you do not know the host's rules, so you do **not** treat it as unrestricted. Fetch nothing from that host this run, record each URL you skip as a blocked-sources row with wall type `robots` and the note `robots.txt could not be checked`, and say in `## Summary` how many hosts went unchecked and why. Never let an unchecked `robots.txt` pass silently.
+
+A URL you may not fetch is not fetched and not counted; record it as a blocked-sources row with wall type `robots`, which is the one wall type briefing mode adds to the two the table above carries. Parallel fan-out stays parallel **across** hosts and is serial **within** one host — never two concurrent requests to the same host, the `robots.txt` fetch included.
 
 **The depth layer is off unless the directive says `depth: on`.** With `depth: off`, do not call a `browser_*` tool even when the tools are present: a walled page takes the blocked-sources treatment from the graceful-degradation rule above. With `depth: on`, the depth layer's rules apply exactly as written above.
 
@@ -349,9 +357,10 @@ The template above is unchanged — both layers, the design rule, the blocked-so
 - **Maximum hop distance reached:** <H>
 - **Elapsed minutes:** <E> (`date +%s` at the last fetch, minus `started-at`)
 - **Exit condition:** yield target met | cap reached: pages | cap reached: hops | cap reached: minutes | frontier drained
+- **robots.txt not checked:** <K> hosts (<host>, <host>) — <why: permission denied | network | 5xx>
 ```
 
-The exit condition must agree with the figures beside it: `cap reached: pages` with `<N>` short of `max-pages` is a contradiction a reader will catch. Add a `- **Retriever:**` line naming the path and the exit code only if a call failed.
+The exit condition must agree with the figures beside it: `cap reached: pages` with `<N>` short of `max-pages` is a contradiction a reader will catch. Add a `- **Retriever:**` line naming the path and the exit code only if a call failed. Write the `robots.txt not checked` line only when K is above zero.
 
 **Three lines on each item's claim block** in `## Findings`:
 
@@ -365,7 +374,7 @@ The exit condition must agree with the figures beside it: `cap reached: pages` w
 
 **One narrowing of the report filename.** In briefing mode, and only in briefing mode, the `<topic>` half of the path is the directive's `report-slug`, used **verbatim** — do not re-slug the question. The prefix half is untouched: `date +"${SCOUT_FILE_PREFIX:-%Y-%m-%d_%H-%M}"` exactly as the Timestamps section above specifies, and the directive has no say over it. Everything else about the write boundary holds unchanged — one file per run, the bare relative path, `mkdir -p scout-workbench/research/`, no absolute base. The result is `scout-workbench/research/<prefix>-<report-slug>.md`, which the caller locates by its `-<report-slug>.md` ending alone.
 
-**Briefing mode adds no tool and no dispatch.** It uses `Bash` for `date +%s`, for the retriever and for `curl`-ing `robots.txt` — shell commands in this one process, exactly like the `date` and `mkdir -p` the run already relies on. It never dispatches a sub-agent, and it never needs to. The depth-one invariant at the top of this file holds unchanged.
+**Briefing mode adds no tool and no dispatch.** It uses `Bash` for `date +%s`, for the retriever and for `curl`-ing `robots.txt` — shell commands in this one process, exactly like the `date`, `mkdir -p` and `pwd` the run already relies on. It never dispatches a sub-agent, and it never needs to. The depth-one invariant at the top of this file holds unchanged.
 
 <!-- ── END BRIEFING MODE ── the sections below apply to every run again. -->
 

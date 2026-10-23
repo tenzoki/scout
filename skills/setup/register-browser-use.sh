@@ -46,12 +46,18 @@
 # standalone run), and registers that copy:
 #   STATE_DIR = ${SCOUT_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/scout}
 #   shim copy = $STATE_DIR/browser-use-anthropic/scout_browseruse_anthropic.py
-# A STATE_DIR that is not absolute, or that lies under a plugin cache
-# (/plugins/cache/), is refused. Decision record:
+# A STATE_DIR that is not absolute, that lies under a plugin cache
+# (/plugins/cache/), or whose path holds a `"` or `\` (it is spliced into a JSON
+# string below) is refused. The shim folder carries a `.scout-owned` marker, which
+# `scout --uninstall` requires before it removes the folder. Decision record:
 # 261016-2323-where-does-scout-keep-state-that-must-survive-a-plugin-update.md
 #
 # The copy is refreshed only when this script runs. A scout release that changes
 # the shim or the browser-use pin therefore needs /scout:setup re-run.
+#
+# Exit codes: 0 the entry is registered and names the shim copy; 1 anything
+# else, with the reason on stderr. Callers (the installer, the launcher's --key,
+# /scout:setup) report success only on 0.
 
 set -u
 set -o pipefail
@@ -72,8 +78,12 @@ esac
 case "$STATE_DIR" in
   */plugins/cache|*/plugins/cache/*) echo "Stopping: the scout state directory '$STATE_DIR' lies inside a plugin cache, which a plugin update deletes. Point SCOUT_STATE_DIR somewhere outside it." >&2; exit 1 ;;
 esac
+case "$STATE_DIR" in
+  *'"'*|*'\'*) echo "Stopping: the scout state directory '$STATE_DIR' contains a \" or \\, which cannot be written into the registration. Point SCOUT_STATE_DIR at a plain path." >&2; exit 1 ;;
+esac
 SHIM_DIR="$STATE_DIR/browser-use-anthropic"
 SHIM_PATH="$SHIM_DIR/scout_browseruse_anthropic.py"
+SHIM_MARKER="$SHIM_DIR/.scout-owned"
 
 echo "== prerequisites =="
 missing=0
@@ -126,12 +136,30 @@ if [ "$INHERIT" -eq 1 ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
   } >&2
 fi
 
-# Optional non-default extraction model.
+# Optional non-default extraction model. It is spliced into a JSON string in
+# inherit mode, so the characters that would break that string are refused.
 MODEL="${SCOUT_DEPTH_EXTRACT_MODEL:-}"
+case "$MODEL" in
+  *'"'*|*'\'*) echo "Stopping: SCOUT_DEPTH_EXTRACT_MODEL contains a \" or \\; a model name never does." >&2; exit 1 ;;
+esac
 
 echo
 echo "== copy shim to the state directory =="
+# Write only into a folder scout owns: absent, empty, marked, under the default
+# state directory (only scout uses it), or holding scout's shim as 0.6.0 left it
+# before the marker existed. Anything else is someone else's folder.
+if [ -e "$SHIM_DIR" ] && [ ! -f "$SHIM_MARKER" ]; then
+  if [ -d "$SHIM_DIR" ] && { [ -z "$(ls -A "$SHIM_DIR" 2>/dev/null)" ] || [ -z "${SCOUT_STATE_DIR:-}" ] || [ -f "$SHIM_PATH" ]; }; then
+    :
+  else
+    echo "Stopping: $SHIM_DIR exists and was not written by scout (no .scout-owned marker). Move it aside or set SCOUT_STATE_DIR to another directory." >&2
+    exit 1
+  fi
+fi
 if ! mkdir -p "$SHIM_DIR"; then echo "Stopping: could not create $SHIM_DIR." >&2; exit 1; fi
+if [ ! -f "$SHIM_MARKER" ] && ! printf '%s\n' "Written by scout (register-browser-use.sh). scout --uninstall removes this folder only while this file is here." > "$SHIM_MARKER"; then
+  echo "Stopping: could not write the ownership marker $SHIM_MARKER." >&2; exit 1
+fi
 if ! cp "$SRC_SHIM" "$SHIM_PATH"; then echo "Stopping: could not copy the shim to $SHIM_PATH." >&2; exit 1; fi
 if ! cmp -s "$SRC_SHIM" "$SHIM_PATH"; then echo "Stopping: the shim copy at $SHIM_PATH does not match $SRC_SHIM." >&2; exit 1; fi
 echo "shim copy: $SHIM_PATH"
@@ -144,14 +172,21 @@ echo "== register browser-use (user scope) =="
 # pipefail.
 claude mcp remove browser-use -s user >/dev/null 2>&1 || true
 
+# The old entry is gone by now, so a failed add leaves no registration at all.
+# That must decide the exit code, or every caller reports success.
+add_failed() {
+  echo "Stopping: 'claude mcp add' failed, so browser-use is NOT registered (the previous entry was already removed). Fix the error above and re-run." >&2
+  exit 1
+}
+
 if [ "$INHERIT" -eq 1 ]; then
   # No ANTHROPIC_API_KEY entry: the running session inherits it from the
   # environment. The shim still runs (SCOUT_DEPTH_PROVIDER=anthropic) and both
   # no-cloud env vars are passed.
   if [ -n "$MODEL" ]; then
-    claude mcp add-json browser-use -s user '{ "type": "stdio", "command": "uvx", "args": ["--from", "'"$PIN"'", "python", "'"$SHIM_PATH"'", "--mcp"], "env": { "SCOUT_DEPTH_PROVIDER": "anthropic", "SCOUT_DEPTH_EXTRACT_MODEL": "'"$MODEL"'", "ANONYMIZED_TELEMETRY": "False", "BROWSER_USE_VERSION_CHECK": "false" } }'
+    claude mcp add-json browser-use -s user '{ "type": "stdio", "command": "uvx", "args": ["--from", "'"$PIN"'", "python", "'"$SHIM_PATH"'", "--mcp"], "env": { "SCOUT_DEPTH_PROVIDER": "anthropic", "SCOUT_DEPTH_EXTRACT_MODEL": "'"$MODEL"'", "ANONYMIZED_TELEMETRY": "False", "BROWSER_USE_VERSION_CHECK": "false" } }' || add_failed
   else
-    claude mcp add-json browser-use -s user '{ "type": "stdio", "command": "uvx", "args": ["--from", "'"$PIN"'", "python", "'"$SHIM_PATH"'", "--mcp"], "env": { "SCOUT_DEPTH_PROVIDER": "anthropic", "ANONYMIZED_TELEMETRY": "False", "BROWSER_USE_VERSION_CHECK": "false" } }'
+    claude mcp add-json browser-use -s user '{ "type": "stdio", "command": "uvx", "args": ["--from", "'"$PIN"'", "python", "'"$SHIM_PATH"'", "--mcp"], "env": { "SCOUT_DEPTH_PROVIDER": "anthropic", "ANONYMIZED_TELEMETRY": "False", "BROWSER_USE_VERSION_CHECK": "false" } }' || add_failed
   fi
   # Inherit-mode runtime contract: the key is read from the launching shell's
   # environment when the MCP server starts, not from this config. Say so plainly
@@ -168,9 +203,9 @@ else
   # Flag form keeps the key out of a JSON blob and matches the skill's documented
   # mechanism. The shim runs inside the pinned browser-use env via `--from`.
   if [ -n "$MODEL" ]; then
-    claude mcp add browser-use uvx -s user -e ANTHROPIC_API_KEY="$KEY" -e SCOUT_DEPTH_PROVIDER=anthropic -e SCOUT_DEPTH_EXTRACT_MODEL="$MODEL" -e ANONYMIZED_TELEMETRY=False -e BROWSER_USE_VERSION_CHECK=false -- --from "$PIN" python "$SHIM_PATH" --mcp
+    claude mcp add browser-use uvx -s user -e ANTHROPIC_API_KEY="$KEY" -e SCOUT_DEPTH_PROVIDER=anthropic -e SCOUT_DEPTH_EXTRACT_MODEL="$MODEL" -e ANONYMIZED_TELEMETRY=False -e BROWSER_USE_VERSION_CHECK=false -- --from "$PIN" python "$SHIM_PATH" --mcp || add_failed
   else
-    claude mcp add browser-use uvx -s user -e ANTHROPIC_API_KEY="$KEY" -e SCOUT_DEPTH_PROVIDER=anthropic -e ANONYMIZED_TELEMETRY=False -e BROWSER_USE_VERSION_CHECK=false -- --from "$PIN" python "$SHIM_PATH" --mcp
+    claude mcp add browser-use uvx -s user -e ANTHROPIC_API_KEY="$KEY" -e SCOUT_DEPTH_PROVIDER=anthropic -e ANONYMIZED_TELEMETRY=False -e BROWSER_USE_VERSION_CHECK=false -- --from "$PIN" python "$SHIM_PATH" --mcp || add_failed
   fi
 fi
 
@@ -178,12 +213,14 @@ echo
 echo "== verify =="
 VERIFY_OUT="$(claude mcp get browser-use 2>&1)"
 printf '%s\n' "$VERIFY_OUT"
+# A check that can fail decides the exit code: a missing entry, or one that does
+# not name the shim copy, is a failed registration, not a warning.
 case "$VERIFY_OUT" in
   *"$SHIM_PATH"*) echo "shim path: ok ($SHIM_PATH)" ;;
-  *) echo "WARNING: the registered entry does not name the shim copy $SHIM_PATH." >&2 ;;
+  *) echo "Stopping: the registered browser-use entry is missing or does not name the shim copy $SHIM_PATH. Re-run /scout:setup." >&2; exit 1 ;;
 esac
 case "$VERIFY_OUT" in
-  */plugins/cache/*) echo "WARNING: the registered entry names a path under /plugins/cache/, which the next plugin update deletes. Re-run /scout:setup." >&2 ;;
+  */plugins/cache/*) echo "Stopping: the registered entry names a path under /plugins/cache/, which the next plugin update deletes. Re-run /scout:setup." >&2; exit 1 ;;
 esac
 echo
 echo "Done. If the entry shows Type: stdio, Command: uvx, the --from pin + shim path + --mcp args, SCOUT_DEPTH_PROVIDER=anthropic, and the two no-cloud env vars, depth is registered. Re-run scout."

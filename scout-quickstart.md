@@ -117,7 +117,7 @@ First time only, register the add-ons; after that, `scout meta` is all you need.
 
 4. **Restart the session.** MCP servers take effect on restart, so quit and relaunch (`scout meta`) after `/scout:setup`. On the next run scout drives a real browser for pages that need it and discovers URLs through SearXNG.
 
-Plain `scout` (without `meta`) never touches SearXNG, and without the depth layer registered scout simply records any browser-needing page as a gap in the report rather than dropping it — so every layer degrades cleanly to the one below.
+SearXNG is used whenever its MCP is registered and the container answers — in plain `scout` runs too, whoever started the container; `docker stop scout-searxng` sends every run back to `WebSearch`. Without the depth layer registered scout simply records any browser-needing page as a gap in the report rather than dropping it — so every layer degrades cleanly to the one below.
 
 ### Troubleshooting: `searxng` in multiple scopes
 

@@ -137,9 +137,7 @@ Do not guess a different registration command. Use the script, or the manual JSO
 
 ## Step 5 — Confirm the registration took
 
-The script ends by running `claude mcp get browser-use` and printing the result. Read its output: it should show `Type: stdio`, `Command: uvx`, args including `--from`, `browser-use[cli]@0.11.9`, the shim path `<state dir>/browser-use-anthropic/scout_browseruse_anthropic.py` (by default `~/.local/state/scout/browser-use-anthropic/scout_browseruse_anthropic.py`, never a path under `~/.claude/plugins/cache/` or inside `~/.scout`), and `--mcp`, and the env carrying `SCOUT_DEPTH_PROVIDER`, `ANONYMIZED_TELEMETRY`, and `BROWSER_USE_VERSION_CHECK`. Do not print any `ANTHROPIC_API_KEY` value from this output. If the script printed a `WARNING` about the shim path, pass it on: the registration names a file a plugin update can delete.
-
-If the entry is missing or wrong, the registration did not take — report the actual script output and stop so the user can retry, rather than reporting a false success.
+The script ends by running `claude mcp get browser-use` and printing the result. Read its output: it should show `Type: stdio`, `Command: uvx`, args including `--from`, `browser-use[cli]@0.11.9`, the shim path `<state dir>/browser-use-anthropic/scout_browseruse_anthropic.py` (by default `~/.local/state/scout/browser-use-anthropic/scout_browseruse_anthropic.py`, never a path under `~/.claude/plugins/cache/` or inside `~/.scout`), and `--mcp`, and the env carrying `SCOUT_DEPTH_PROVIDER`, `ANONYMIZED_TELEMETRY`, and `BROWSER_USE_VERSION_CHECK`. Do not print any `ANTHROPIC_API_KEY` value from this output. The script exits non-zero when `claude mcp add` failed, when the verified entry is missing or does not name the shim copy, or when it names a path under `/plugins/cache/` (a file a plugin update deletes). Read the exit code: on non-zero, the registration did not take — report the script's `Stopping:` line and stop so the user can retry, rather than reporting a false success. Note that the old entry is removed before the add, so a failed add leaves no browser-use registration at all.
 
 On success, tell the user: depth is registered. Re-run scout — pages that need an interactive browser will now be driven in a real local Chromium, and depth findings will carry the `depth (browser-use, manual drive)` method tag in the report. If they registered via inherit, remind them once more that the depth layer only works when `ANTHROPIC_API_KEY` is live in the shell that launches scout/Claude Code — a green registration alone does not prove the key is reachable at runtime.
 
@@ -175,32 +173,36 @@ command -v docker >/dev/null 2>&1 && echo "docker: ok" || echo "docker: MISSING 
 bash "${CLAUDE_PLUGIN_ROOT}/skills/setup/register-searxng.sh"
 ```
 
-The script removes any existing user-scope `searxng`, adds it fresh under the **exact** name `searxng` (coupled to scout's allow-list prefix `mcp__searxng__searxng_web_search` — a different name means scout silently falls back to WebSearch), at user scope, with `SEARXNG_URL=http://localhost:8911`, then verifies with `claude mcp get searxng`.
+The script removes any existing user-scope `searxng`, adds it fresh under the **exact** name `searxng` (coupled to the prefix `mcp__searxng__` of scout's allow-listed tool `mcp__searxng__searxng_web_search` — a different name means scout silently falls back to WebSearch), at user scope, with `SEARXNG_URL=http://localhost:8911`, then verifies with `claude mcp get searxng`.
 
-**Confirm and set expectations.** Read the script's verify output: it should show `Type: stdio`, `Command: npx`, the pinned `mcp-searxng` arg, and `SEARXNG_URL`. The script also runs a `== scope-conflict check ==` step — if it prints a WARNING that another `searxng` registration is shadowing scout's, surface that warning to the user in scout's voice the same way you surface the browser-use script output: name the conflicting scope/endpoint the script reports and give the fix command `claude mcp remove searxng -s project` (or `-s local`), keeping scout's user-scope entry. A `searxng` that is registered but failing to connect because of a scope conflict is **not** a success — do not report it as one; relay the warning and the fix, and let the user clear the conflict before re-running. On success (no conflict), tell the user: the meta backend is registered. Start scout with `scout meta` (not plain `scout`), or run `/scout:meta` in a Claude Code session, so the SearXNG container comes up; scout then discovers URLs through SearXNG and each discovered source carries a `discovery: searxng` note in the report. If they run plain `scout` without having started the container another way, or if the container is not up, scout discovers with WebSearch — no failure either way. Point them at the README's **Optional metasearch backend (SearXNG)** section for the full picture.
+**Confirm and set expectations.** Read the script's verify output: it should show `Type: stdio`, `Command: npx`, the pinned `mcp-searxng` arg, and `SEARXNG_URL`. The script also runs a `== scope-conflict check ==` step — if it prints a WARNING that another `searxng` registration is shadowing scout's, surface that warning to the user in scout's voice the same way you surface the browser-use script output: name the conflicting scope/endpoint the script reports and give the fix command `claude mcp remove searxng -s project` (or `-s local`), keeping scout's user-scope entry. A `searxng` that is registered but failing to connect because of a scope conflict is **not** a success — do not report it as one; relay the warning and the fix, and let the user clear the conflict before re-running. On success (no conflict), tell the user: the meta backend is registered. Start scout with `scout meta` (not plain `scout`), or run `/scout:meta` in a Claude Code session, so the SearXNG container comes up; scout then discovers URLs through SearXNG and each discovered source carries a `discovery: searxng` note in the report. If they run plain `scout` without having started the container another way, or if the container is not up, scout discovers with WebSearch — no failure either way. Once the container is up, every run uses it, plain `scout` and dispatches from other agents included; `docker stop scout-searxng` sends every run back to WebSearch. Point them at the README's **Optional metasearch backend (SearXNG)** section for the full picture.
 
-## Optional: scope scout's shell access to `date` and `mkdir` only
+## Optional: scope scout's shell access to the commands it runs
 
-scout's agent definition grants the `Bash` tool, but it uses the shell for exactly two commands: `date` (to stamp the report's date-time, sourced from the machine rather than guessed) and `mkdir -p scout-workbench/research/` or the `REPORT DIR` folder (to create the report directory on the first run). It never needs arbitrary shell.
+scout's agent definition grants the `Bash` tool, but it never needs arbitrary shell. This is everything it runs:
+
+- **Every run:** `date` (to stamp the report's date-time, sourced from the machine rather than guessed), `mkdir -p scout-workbench/research/` or the `REPORT DIR` folder (to create the report directory), and `pwd` (to report the report's absolute path back).
+- **Briefing runs only** (`scout brief`): `date +%s` (to measure the time budget), the ledger retriever `briefing/ledger-retrieve.sh`, and `curl` (to fetch each host's `robots.txt`).
 
 Claude Code does **not** let a plugin ship a permission allowlist that binds a dispatched agent's own `Bash` calls — permission rules are read from the `settings.json` precedence chain in the directory where you launch `scout` (enterprise → `~/.claude/settings.json` → the project's `.claude/settings.json` → `.claude/settings.local.json`), not from anything inside `~/.scout`. So the scoping is something **you** add to the project (or your home) settings, and this skill recommends it rather than installing it.
 
-To hold scout to just those two commands, add this to your project's `.claude/settings.json` (or `~/.claude/settings.json` to apply it to every project):
+To hold scout to the commands of a normal run, add this to your project's `.claude/settings.json` (or `~/.claude/settings.json` to apply it to every project):
 
 ```json
 {
   "permissions": {
     "allow": [
       "Bash(date:*)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(pwd)"
     ]
   }
 }
 ```
 
-With this in place, scout's `date` and `mkdir` calls run without a prompt, and any other shell command (a `curl`, a `cat`, an `rm`) falls outside the allowlist — Claude Code prompts you before it runs, so nothing arbitrary executes silently. To make the boundary a hard wall, add a `deny` list as well (e.g. `"deny": ["Bash(curl:*)", "Bash(rm:*)"]`), which Claude Code refuses outright.
+With this in place, scout's `date`, `mkdir` and `pwd` calls run without a prompt, and any other shell command (a `cat`, an `rm`) falls outside the allowlist — Claude Code prompts you before it runs, so nothing arbitrary executes silently. If briefings run under these settings, also allow `Bash(curl:*)` and the retriever. To make the boundary a hard wall, add a `deny` list as well (e.g. `"deny": ["Bash(rm:*)"]`), which Claude Code refuses outright. **Do not deny `curl` where briefings run:** scout then cannot read any host's `robots.txt`, so it fetches nothing from hosts it could not check and lists them in the report as blocked.
 
-**Known gap, stated plainly:** without this snippet, scout still only *calls* `date` and `mkdir` — but Claude Code may prompt you to approve a broader `Bash` permission, and approving it grants more than scout uses. The allowlist is the way to keep scout's shell access scoped to the two commands it actually runs. This is a recommendation, not an automatic install, because no plugin-level mechanism can apply it for you.
+**Known gap, stated plainly:** without this snippet, scout still only *calls* the commands above — but Claude Code may prompt you to approve a broader `Bash` permission, and approving it grants more than scout uses. The allowlist is the way to keep scout's shell access scoped to the commands it actually runs. This is a recommendation, not an automatic install, because no plugin-level mechanism can apply it for you.
 
 ## What this skill does NOT do
 

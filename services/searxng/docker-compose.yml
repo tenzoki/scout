@@ -11,7 +11,8 @@
 # template; the script generates secret_key into the state directory.
 #
 # `name:` pins the compose project so every caller, from whichever plugin copy,
-# addresses the same project. container_name stays scout-specific so it does not
+# addresses the same project. start-searxng.sh also passes `-p scout-searxng`,
+# because an exported COMPOSE_PROJECT_NAME would otherwise override `name:`. container_name stays scout-specific so it does not
 # clash with any other SearXNG container.
 name: scout-searxng
 services:

@@ -129,13 +129,17 @@ fi
 
 # Standalone --key with no other command: instant key reset — re-register the
 # depth layer with the new key WITHOUT a full re-download, then exit.
+# The call sits in an if: under set -e a bare failing call would end the
+# launcher before it could say that the registration failed.
 if [ "\$SCOUT_KEY_GIVEN" -eq 1 ] && [ "\$#" -eq 0 ]; then
-  BROWSERUSE_ANTHROPIC_KEY="\$BROWSERUSE_ANTHROPIC_KEY" bash "\$SCOUT_DIR/skills/setup/register-browser-use.sh"
-  rc=\$?
-  if [ "\$rc" -eq 0 ]; then
+  if BROWSERUSE_ANTHROPIC_KEY="\$BROWSERUSE_ANTHROPIC_KEY" bash "\$SCOUT_DIR/skills/setup/register-browser-use.sh"; then
     echo "scout: depth layer re-registered with the new key."
+    exit 0
+  else
+    rc=\$?
+    echo "scout: depth-layer registration FAILED (exit \$rc); the reason is above. browser-use is not registered with the new key." >&2
+    exit \$rc
   fi
-  exit \$rc
 fi
 
 case "\${1:-}" in
@@ -149,19 +153,31 @@ case "\${1:-}" in
     # The SearXNG container and scout's user state directory (SearXNG secret and
     # config, the browser-use shim copy) live outside the install; remove them
     # too. Same state-dir rule as the scripts that write it. Only the two
-    # subtrees scout writes are removed, never the directory itself: it may be
-    # a user-chosen SCOUT_STATE_DIR holding other files, and rmdir only
-    # succeeds when nothing else is left in it.
+    # subfolders scout writes are removed, and only when they carry the
+    # .scout-owned marker those scripts drop into them: the names are generic,
+    # and a user-chosen SCOUT_STATE_DIR may hold a folder of the same name that
+    # scout never wrote. Under the default directory, which only scout uses, an
+    # unmarked folder from before the marker existed counts as scout's. The
+    # directory itself goes only through rmdir, which succeeds only when empty.
     docker rm -f scout-searxng >/dev/null 2>&1 || true
     SCOUT_STATE="\${SCOUT_STATE_DIR:-\${XDG_STATE_HOME:-\$HOME/.local/state}/scout}"
+    # Collapse repeated slashes and drop a trailing one before comparing, so
+    # \$HOME// or /// cannot slip past the root and home guard.
+    SCOUT_STATE="\$(printf '%s' "\$SCOUT_STATE" | sed -e 's#//*#/#g' -e 's#\(.\)/\$#\1#')"
+    SCOUT_HOME_N="\$(printf '%s' "\$HOME" | sed -e 's#//*#/#g' -e 's#\(.\)/\$#\1#')"
+    if [ -z "\${SCOUT_STATE_DIR:-}" ]; then SCOUT_STATE_DEFAULT=1; else SCOUT_STATE_DEFAULT=0; fi
     case "\$SCOUT_STATE" in
-      /|"\$HOME"|"\$HOME/") echo "scout: not touching state directory '\$SCOUT_STATE' (refusing a root or home path)." >&2 ;;
+      /|"\$SCOUT_HOME_N") echo "scout: not touching state directory '\$SCOUT_STATE' (refusing a root or home path)." >&2 ;;
       */plugins/cache|*/plugins/cache/*) echo "scout: not touching state directory '\$SCOUT_STATE' (it lies inside the plugin cache)." >&2 ;;
       /?*)
         for SCOUT_SUB in browser-use-anthropic searxng; do
-          if [ -e "\$SCOUT_STATE/\$SCOUT_SUB" ]; then
-            echo "scout: removing \$SCOUT_STATE/\$SCOUT_SUB"
-            rm -rf "\$SCOUT_STATE/\$SCOUT_SUB"
+          SCOUT_P="\$SCOUT_STATE/\$SCOUT_SUB"
+          [ -e "\$SCOUT_P" ] || [ -L "\$SCOUT_P" ] || continue
+          if [ -f "\$SCOUT_P/.scout-owned" ] || { [ "\$SCOUT_STATE_DEFAULT" -eq 1 ] && [ -d "\$SCOUT_P" ]; }; then
+            echo "scout: removing \$SCOUT_P"
+            rm -rf "\$SCOUT_P"
+          else
+            echo "scout: leaving \$SCOUT_P in place: it has no .scout-owned marker, so scout did not write it (or wrote it before scout added the marker). Remove it yourself if it is scout's." >&2
           fi
         done
         rmdir "\$SCOUT_STATE" 2>/dev/null || true
@@ -219,7 +235,7 @@ if [ -n "${BROWSERUSE_ANTHROPIC_KEY:-}" ]; then
   if BROWSERUSE_ANTHROPIC_KEY="$BROWSERUSE_ANTHROPIC_KEY" bash "$INSTALL_DIR/skills/setup/register-browser-use.sh"; then
     say "Depth layer registered: browser-use MCP pinned to your Anthropic key (your shell stays on subscription auth)."
   else
-    warn "Depth-layer registration did not complete (e.g. uvx missing) — scout's breadth core is installed and works regardless."
+    warn "Depth-layer registration FAILED (the reason is above; e.g. uvx missing, or 'claude mcp add' failed) — browser-use is not registered. scout's breadth core is installed and works regardless."
     warn "Re-run with BROWSERUSE_ANTHROPIC_KEY set, or use /scout:setup, once the prerequisite is in place."
   fi
 else
