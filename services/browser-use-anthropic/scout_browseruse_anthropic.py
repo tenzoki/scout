@@ -30,8 +30,14 @@ Environment:
                                is a near-deterministic read-back, per
                                7006b63); with SCOUT_DEPTH_EXTRACT_MODEL set,
                                no temperature is sent, so the API default
-                               applies and a model that rejects non-default
-                               sampling values (e.g. claude-haiku-5-5) works.
+                               applies (some models reject non-default
+                               sampling values). An override must be a model
+                               whose reply starts with a text block (e.g.
+                               claude-haiku-4-5, or a claude-sonnet model
+                               without extended thinking): browser-use
+                               0.11.9's extraction reads only the first
+                               content block, so a model that thinks by
+                               default returns its thinking block instead.
                                An unparseable or out-of-range value is treated
                                as unset, with a note on stderr.
     ANTHROPIC_API_KEY          read by the Anthropic SDK / passed explicitly.
@@ -119,9 +125,11 @@ def _extract_temperature(model_overridden: bool) -> "float | None":
     request, so the API default applies. The rule, one branch per case:
     - SCOUT_DEPTH_EXTRACT_TEMPERATURE set to a number in [0, 1]: that number.
     - otherwise, default model: DEFAULT_EXTRACT_TEMPERATURE.
-    - otherwise, model overridden: None, because newer models
-      (claude-haiku-5-5) answer 400 to any non-default sampling value, and
-      scout cannot know what an operator-chosen model accepts.
+    - otherwise, model overridden: None, because some models answer 400 to
+      any non-default sampling value, and scout cannot know what an
+      operator-chosen model accepts. (Sending none only gets the request
+      accepted; the override must still reply with a text block first, since
+      browser-use 0.11.9 reads only the first content block.)
     A set value that is not a number, or lies outside [0, 1], counts as unset,
     and stderr says which value was refused, so a typo is visible in the MCP
     server log.

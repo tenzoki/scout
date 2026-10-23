@@ -55,22 +55,34 @@ echo "== scope-conflict check =="
 # to a project the user still wants.
 conflict=0
 
+# Both signals capture the output and test it in the shell, never by piping it
+# into `grep -q`: GNU grep exits on its first match, the writer's next write then
+# fails with SIGPIPE, and pipefail would turn a match into a false conflict. `tr`
+# reads to EOF, so lowercasing through it is safe.
+
 # Signal 1: `claude mcp list` surfaces the multi-scope conflict on a searxng line.
 list_out="$(claude mcp list 2>&1 || true)"
-if printf '%s\n' "$list_out" | grep -i 'searxng' | grep -qi 'multiple scopes\|different endpoint'; then
-  conflict=1
-fi
+list_lower="$(printf '%s\n' "$list_out" | tr '[:upper:]' '[:lower:]')"
+while IFS= read -r line; do
+  case "$line" in
+    *searxng*) ;;
+    *) continue ;;
+  esac
+  case "$line" in
+    *'multiple scopes'*|*'different endpoint'*) conflict=1 ;;
+  esac
+done <<< "$list_lower"
 
 # Signal 2: the RESOLVED searxng server is not scout's. scout's resolved command
 # is `npx ... mcp-searxng` carrying SEARXNG_URL. If the active resolution is
 # something else (e.g. a `python3 .../server.py`), a higher-priority scope is
 # overriding scout's user-scope registration.
 get_out="$(claude mcp get searxng 2>&1 || true)"
-if printf '%s\n' "$get_out" | grep -qi 'mcp-searxng'; then
-  : # resolved command is scout's npx mcp-searxng — expected
-else
-  conflict=1
-fi
+get_lower="$(printf '%s\n' "$get_out" | tr '[:upper:]' '[:lower:]')"
+case "$get_lower" in
+  *mcp-searxng*) : ;; # resolved command is scout's npx mcp-searxng — expected
+  *) conflict=1 ;;
+esac
 
 if [ "$conflict" -ne 0 ]; then
   echo "WARNING: another 'searxng' registration is shadowing scout's."
