@@ -45,13 +45,24 @@ Environment:
                                as unset, with a note on stderr.
     ANTHROPIC_API_KEY          read by the Anthropic SDK / passed explicitly.
 
+Failed start: stock `_init_browser_session` assigns `self.browser_session`
+before awaiting its `start()`, and stock only initialises when that attribute
+is None. A start that times out would therefore leave the server stuck for
+good ('LLM not initialized', 'Root CDP client not initialized'). The wrap
+discards the half-started session and re-raises, so the next tool call retries.
+
 Pin discipline: a browser-use bump is a deliberate, tested change. The shim
-depends on three named browser-use internals — `server.ChatOpenAI` (the symbol
-it supplants), `BrowserUseServer._init_browser_session` (the wrap target), and
-`ChatAnthropic` (the replacement). The import-time guard below fails loudly if
-any of them is renamed upstream, instead of silently falling back to OpenAI.
+depends on four named browser-use internals — `server.ChatOpenAI` (the symbol
+it supplants), `BrowserUseServer._init_browser_session` (the wrap target),
+`ChatAnthropic` (the replacement) and `server.BrowserSession.kill` (stops a
+session whose start failed). The import-time guard below fails loudly if any
+of them is renamed upstream, instead of silently falling back to OpenAI. The
+failed-start recovery also relies on the instance attributes `browser_session`,
+`tools`, `file_system` and `active_sessions` (keyed by session `id`), which an
+import-time check cannot see; re-read them in `server.py` on a bump.
 """
 
+import asyncio
 import functools
 import os
 import sys
@@ -69,7 +80,7 @@ def _fail(symbol: str, detail: str) -> None:
         f"  Pinned browser-use: {PIN}\n"
         f"  An upstream rename likely broke this shim. Re-confirm the patched "
         f"symbols (server.ChatOpenAI, BrowserUseServer._init_browser_session, "
-        f"ChatAnthropic) against the new version and re-run the smoke test.\n"
+        f"ChatAnthropic, BrowserSession.kill) against the new version and re-run the smoke test.\n"
         f"  Refusing to fall back to OpenAI silently.",
         file=sys.stderr,
     )
@@ -105,6 +116,12 @@ def _resolve():
     # moved; the wrap below would silently no-op, so fail loudly instead.
     if not hasattr(server, "ChatOpenAI"):
         _fail("server.ChatOpenAI", "name not found at module scope")
+
+    # What the wrap calls to stop a session whose start failed. Without it the
+    # recovery path would raise AttributeError (logged, not fatal) and leave a
+    # launched browser behind, so a rename must surface here instead.
+    if not hasattr(getattr(server, "BrowserSession", None), "kill"):
+        _fail("server.BrowserSession.kill", "method not found on BrowserSession")
 
     return server, ChatAnthropic
 
@@ -157,6 +174,50 @@ def _extract_temperature(model_overridden: bool) -> "float | None":
     return value
 
 
+# Upper bound on tearing down a half-started browser. kill() can wait on
+# browser-use's own stop timeouts (up to 45 s); the tool call that failed should
+# not hang that long on cleanup that is only best-effort anyway.
+DISCARD_TIMEOUT_SECONDS = 10.0
+
+
+async def _discard_half_started(self) -> None:
+    """Undo what a failed stock _init_browser_session left behind.
+
+    Stock assigns self.browser_session BEFORE awaiting its start(), and builds
+    self.tools / self.llm / self.file_system only after start() returns. When
+    start() raises or times out (e.g. browser-use's 30 s BrowserStartEvent
+    timeout on a slow first launch), the server is left with a non-None but
+    unstarted session and no tools. Stock _execute_tool only initialises
+    `if not self.browser_session`, so it never retries: every later call fails
+    with 'Root CDP client not initialized' or 'LLM not initialized'.
+
+    Resetting the attributes is what makes the next tool call retry the whole
+    start, so it happens first and unconditionally. Killing the dead session is
+    best-effort and bounded; its failure is logged, never raised, so the
+    caller's original exception is the one that propagates.
+    """
+    session = self.browser_session
+    self.browser_session = None
+    self.tools = None
+    self.file_system = None
+    if session is None:
+        return
+    # Stock tracks the session only after start() succeeds, so a start failure
+    # leaves no entry; a failure later in init (Tools(), FileSystem()) would.
+    # Drop it either way so browser_list_sessions does not list a dead session.
+    active = getattr(self, "active_sessions", None)
+    if isinstance(active, dict):
+        active.pop(getattr(session, "id", None), None)
+    try:
+        await asyncio.wait_for(session.kill(), timeout=DISCARD_TIMEOUT_SECONDS)
+    except Exception as exc:  # noqa: BLE001 - cleanup must not mask the cause
+        print(
+            f"scout-browseruse-anthropic: could not stop the half-started "
+            f"browser session after a failed start: {exc!r}",
+            file=sys.stderr,
+        )
+
+
 def _install_anthropic_patch(server, ChatAnthropic) -> None:
     """Wrap _init_browser_session so self.llm is an Anthropic extraction model.
 
@@ -165,6 +226,12 @@ def _install_anthropic_patch(server, ChatAnthropic) -> None:
     and self.llm stays None. So this wrapper sets self.llm UNCONDITIONALLY after
     the stock method, never "replace if present" — otherwise extraction would
     hit the 'LLM not initialized' guard.
+
+    If the stock method fails, the wrapper discards the half-started session
+    (see _discard_half_started) and re-raises, so the next tool call starts
+    over and reaches the self.llm assignment. That is why self.llm needs no
+    second assignment before the stock call: no tool runs against a session
+    whose init did not complete.
     """
     model_override = os.getenv("SCOUT_DEPTH_EXTRACT_MODEL", "").strip()
     model = model_override or DEFAULT_EXTRACT_MODEL
@@ -173,7 +240,16 @@ def _install_anthropic_patch(server, ChatAnthropic) -> None:
 
     @functools.wraps(stock_init)
     async def _patched_init(self, *args, **kwargs):
-        await stock_init(self, *args, **kwargs)
+        # Stock returns early when a session already exists; only a call that
+        # starts from no session may tear down what it built.
+        starting_fresh = self.browser_session is None
+        try:
+            await stock_init(self, *args, **kwargs)
+        except BaseException:
+            # BaseException: a timeout can arrive as asyncio.CancelledError.
+            if starting_fresh:
+                await _discard_half_started(self)
+            raise
         # Unconditional: replace whatever the stock OpenAI branch did (or did
         # not) build with an Anthropic extraction model. api_key may be None;
         # the Anthropic SDK then reads ANTHROPIC_API_KEY from the environment.
@@ -188,8 +264,6 @@ def _install_anthropic_patch(server, ChatAnthropic) -> None:
 
 
 def main() -> None:
-    import asyncio
-
     provider = os.getenv("SCOUT_DEPTH_PROVIDER", "anthropic").strip().lower()
 
     server, ChatAnthropic = _resolve()

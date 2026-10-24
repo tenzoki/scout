@@ -11,7 +11,10 @@ and confirmed each step.
 
 Under scout's pin discipline, re-run this whole runbook on every browser-use
 version bump, after re-confirming the shim's patched symbols still exist
-(`server.ChatOpenAI`, `BrowserUseServer._init_browser_session`, `ChatAnthropic`).
+(`server.ChatOpenAI`, `BrowserUseServer._init_browser_session`, `ChatAnthropic`,
+`server.BrowserSession.kill`) and that the failed-start recovery's instance
+attributes (`browser_session`, `tools`, `file_system`, `active_sessions`) are
+still set in `BrowserUseServer.__init__` / `_init_browser_session`.
 
 Throughout, `<plugin>` is your scout plugin root:
 - launcher install: `~/.scout`
