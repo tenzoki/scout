@@ -49,7 +49,7 @@ exercises the import guard and the Anthropic patch without involving Claude Code
 or a registration.
 
 ```bash
-ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY SCOUT_DEPTH_PROVIDER=anthropic ANONYMIZED_TELEMETRY=False BROWSER_USE_VERSION_CHECK=false uvx --python 3.12 --from "browser-use[cli]@0.11.9" --with "mcp==1.30.0" --with "pydantic-settings==2.16.1" python <plugin>/services/browser-use-anthropic/scout_browseruse_anthropic.py --mcp
+ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY SCOUT_DEPTH_PROVIDER=anthropic TIMEOUT_BrowserStartEvent=120 TIMEOUT_BrowserLaunchEvent=120 ANONYMIZED_TELEMETRY=False BROWSER_USE_VERSION_CHECK=false uvx --python 3.12 --from "browser-use[cli]@0.11.9" --with "mcp==1.30.0" --with "pydantic-settings==2.16.1" python <plugin>/services/browser-use-anthropic/scout_browseruse_anthropic.py --mcp
 ```
 
 Confirm:
@@ -112,7 +112,10 @@ Confirm the `env` block carries both:
 - `ANONYMIZED_TELEMETRY=False`
 - `BROWSER_USE_VERSION_CHECK=false`
 
-Confirm also that the args name the registered shim copy,
+Confirm also that the env carries the two browser start timeouts,
+`TIMEOUT_BrowserStartEvent=120` and `TIMEOUT_BrowserLaunchEvent=120` (browser-use's
+default of 30 s is too short for a first start that downloads Chrome), and that
+the args name the registered shim copy,
 `<state dir>/browser-use-anthropic/scout_browseruse_anthropic.py`, and no path
 under `~/.claude/plugins/cache/` or inside `~/.scout`.
 

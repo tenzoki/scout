@@ -87,6 +87,14 @@ PYTHON="3.12"
 MCP_PIN="mcp==1.30.0"
 PS_PIN="pydantic-settings==2.16.1"
 
+# Browser start timeouts, in seconds. browser-use 0.11.9 gives BrowserStartEvent
+# and BrowserLaunchEvent 30 s each (browser_use/browser/events.py). A first start
+# that has to download Chrome takes longer, times out, and the depth layer looks
+# broken. browser-use reads TIMEOUT_<EventName> from the server's environment each
+# time it creates the event, so passing these in the registration's env is enough.
+START_TIMEOUT=120
+LAUNCH_TIMEOUT=120
+
 # The source shim is resolved from this script's own location, so it is correct
 # in any plugin copy (launcher, marketplace cache, source tree). It is only ever
 # read; the registration names the copy in STATE_DIR (see header).
@@ -239,7 +247,7 @@ if [ "$INHERIT" -eq 1 ]; then
   # No ANTHROPIC_API_KEY entry: the running session inherits it from the
   # environment. The shim still runs (SCOUT_DEPTH_PROVIDER=anthropic) and both
   # no-cloud env vars are passed.
-  claude mcp add-json browser-use -s user '{ "type": "stdio", "command": "uvx", "args": ["--python", "'"$PYTHON"'", "--from", "'"$PIN"'", "--with", "'"$MCP_PIN"'", "--with", "'"$PS_PIN"'", "python", "'"$SHIM_PATH"'", "--mcp"], "env": { "SCOUT_DEPTH_PROVIDER": "anthropic", '"$OPT_JSON"'"ANONYMIZED_TELEMETRY": "False", "BROWSER_USE_VERSION_CHECK": "false" } }' || add_failed
+  claude mcp add-json browser-use -s user '{ "type": "stdio", "command": "uvx", "args": ["--python", "'"$PYTHON"'", "--from", "'"$PIN"'", "--with", "'"$MCP_PIN"'", "--with", "'"$PS_PIN"'", "python", "'"$SHIM_PATH"'", "--mcp"], "env": { "SCOUT_DEPTH_PROVIDER": "anthropic", '"$OPT_JSON"'"TIMEOUT_BrowserStartEvent": "'"$START_TIMEOUT"'", "TIMEOUT_BrowserLaunchEvent": "'"$LAUNCH_TIMEOUT"'", "ANONYMIZED_TELEMETRY": "False", "BROWSER_USE_VERSION_CHECK": "false" } }' || add_failed
   # Inherit-mode runtime contract: the key is read from the launching shell's
   # environment when the MCP server starts, not from this config. Say so plainly
   # so a green registration is not mistaken for a working depth layer.
@@ -258,7 +266,7 @@ else
   # on the pinned Python and with the two pinned `--with` packages.
   # `${OPT_FLAGS[@]+...}` keeps an empty array from tripping `set -u` on bash 3.2.
   # Output goes through redact; pipefail keeps claude's exit code deciding.
-  claude mcp add browser-use uvx -s user -e ANTHROPIC_API_KEY="$KEY" -e SCOUT_DEPTH_PROVIDER=anthropic ${OPT_FLAGS[@]+"${OPT_FLAGS[@]}"} -e ANONYMIZED_TELEMETRY=False -e BROWSER_USE_VERSION_CHECK=false -- --python "$PYTHON" --from "$PIN" --with "$MCP_PIN" --with "$PS_PIN" python "$SHIM_PATH" --mcp 2>&1 | redact || add_failed
+  claude mcp add browser-use uvx -s user -e ANTHROPIC_API_KEY="$KEY" -e SCOUT_DEPTH_PROVIDER=anthropic ${OPT_FLAGS[@]+"${OPT_FLAGS[@]}"} -e TIMEOUT_BrowserStartEvent="$START_TIMEOUT" -e TIMEOUT_BrowserLaunchEvent="$LAUNCH_TIMEOUT" -e ANONYMIZED_TELEMETRY=False -e BROWSER_USE_VERSION_CHECK=false -- --python "$PYTHON" --from "$PIN" --with "$MCP_PIN" --with "$PS_PIN" python "$SHIM_PATH" --mcp 2>&1 | redact || add_failed
 fi
 
 echo
@@ -282,8 +290,18 @@ for want in "--python $PYTHON " "--with $MCP_PIN " "--with $PS_PIN "; do
   esac
 done
 echo "python and dependency pins: ok ($PYTHON, $MCP_PIN, $PS_PIN)"
+# Without the start timeouts a first start that downloads Chrome times out.
+# `claude mcp get` lists env as NAME=value, one per line; the trailing newline
+# keeps 120 from matching 1200.
+for want in "TIMEOUT_BrowserStartEvent=$START_TIMEOUT" "TIMEOUT_BrowserLaunchEvent=$LAUNCH_TIMEOUT"; do
+  case "$VERIFY_OUT"$'\n' in
+    *"$want"$'\n'*) ;;
+    *) echo "Stopping: the registered browser-use entry does not carry '$want', so a first browser start that downloads Chrome would time out. Re-run /scout:setup." >&2; exit 1 ;;
+  esac
+done
+echo "browser start timeouts: ok (${START_TIMEOUT}s start, ${LAUNCH_TIMEOUT}s launch)"
 case "$VERIFY_OUT" in
   */plugins/cache/*) echo "Stopping: the registered entry names a path under /plugins/cache/, which the next plugin update deletes. Re-run /scout:setup." >&2; exit 1 ;;
 esac
 echo
-echo "Done. If the entry shows Type: stdio, Command: uvx, the --python, --from and two --with pins + shim path + --mcp args, SCOUT_DEPTH_PROVIDER=anthropic, and the two no-cloud env vars, depth is registered. Re-run scout."
+echo "Done. If the entry shows Type: stdio, Command: uvx, the --python, --from and two --with pins + shim path + --mcp args, SCOUT_DEPTH_PROVIDER=anthropic, the two start timeouts, and the two no-cloud env vars, depth is registered. Re-run scout."

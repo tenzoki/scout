@@ -47,6 +47,8 @@ command -v uvx    >/dev/null 2>&1 && echo "uvx: ok"    || echo "uvx: MISSING"
 
 Only continue when both report `ok`.
 
+Recommend, without blocking on it, that the user install **Google Chrome** before the first depth run. browser-use uses an installed Chrome (or Chromium) when it finds one; without one, its first start downloads Chrome through Playwright, which is slow. The registration allows a browser start 120 seconds (browser-use's default is 30), but an installed Chrome avoids the wait. Do not install it for them.
+
 If the server is already registered, the script removes the old user-scope entry and re-adds it with the tested config (the CLI's `add`/`add-json` refuse to overwrite an existing server, so a clean remove-then-add is what makes the re-run replace it) — say so and continue:
 
 ```bash
@@ -135,6 +137,8 @@ In the JSON, replace `<state dir>` with the absolute path that state directory e
       "env": {
         "ANTHROPIC_API_KEY": "<your own Anthropic API key>",
         "SCOUT_DEPTH_PROVIDER": "anthropic",
+        "TIMEOUT_BrowserStartEvent": "120",
+        "TIMEOUT_BrowserLaunchEvent": "120",
         "ANONYMIZED_TELEMETRY": "False",
         "BROWSER_USE_VERSION_CHECK": "false"
       }
@@ -147,7 +151,7 @@ Do not guess a different registration command. Use the script, or the manual JSO
 
 ## Step 5 — Confirm the registration took
 
-The script ends by running `claude mcp get browser-use` and printing the result. Read its output: it should show `Type: stdio`, `Command: uvx`, args including `--python 3.12`, `--from`, `browser-use[cli]@0.11.9`, `--with mcp==1.30.0`, `--with pydantic-settings==2.16.1`, the shim path `<state dir>/browser-use-anthropic/scout_browseruse_anthropic.py` (by default `~/.local/state/scout/browser-use-anthropic/scout_browseruse_anthropic.py`, never a path under `~/.claude/plugins/cache/` or inside `~/.scout`), and `--mcp`, and the env carrying `SCOUT_DEPTH_PROVIDER`, `ANONYMIZED_TELEMETRY`, and `BROWSER_USE_VERSION_CHECK`. The script masks any `ANTHROPIC_API_KEY` value as `<redacted>`; never try to recover or print it. The script exits non-zero when `claude mcp add` failed, when the verified entry is missing, does not name the shim copy or lacks one of the three pins above, or when it names a path under `/plugins/cache/` (a file a plugin update deletes). Read the exit code: on non-zero, the registration did not take — report the script's `Stopping:` line and stop so the user can retry, rather than reporting a false success. Note that the old entry is removed before the add, so a failed add leaves no browser-use registration at all.
+The script ends by running `claude mcp get browser-use` and printing the result. Read its output: it should show `Type: stdio`, `Command: uvx`, args including `--python 3.12`, `--from`, `browser-use[cli]@0.11.9`, `--with mcp==1.30.0`, `--with pydantic-settings==2.16.1`, the shim path `<state dir>/browser-use-anthropic/scout_browseruse_anthropic.py` (by default `~/.local/state/scout/browser-use-anthropic/scout_browseruse_anthropic.py`, never a path under `~/.claude/plugins/cache/` or inside `~/.scout`), and `--mcp`, and the env carrying `SCOUT_DEPTH_PROVIDER`, `TIMEOUT_BrowserStartEvent=120`, `TIMEOUT_BrowserLaunchEvent=120`, `ANONYMIZED_TELEMETRY`, and `BROWSER_USE_VERSION_CHECK`. The script masks any `ANTHROPIC_API_KEY` value as `<redacted>`; never try to recover or print it. The script exits non-zero when `claude mcp add` failed, when the verified entry is missing, does not name the shim copy, lacks one of the three pins above or one of the two start timeouts, or when it names a path under `/plugins/cache/` (a file a plugin update deletes). Read the exit code: on non-zero, the registration did not take — report the script's `Stopping:` line and stop so the user can retry, rather than reporting a false success. Note that the old entry is removed before the add, so a failed add leaves no browser-use registration at all.
 
 On success, tell the user: depth is registered. Re-run scout — pages that need an interactive browser will now be driven in a real local Chromium, and depth findings will carry the `depth (browser-use, manual drive)` method tag in the report. Restart Claude Code so the new registration loads. If they registered via inherit at their explicit request, remind them once that the depth layer then only works when `ANTHROPIC_API_KEY` is live in the shell that launches Claude Code — a green registration alone does not prove the key is reachable — and that the same variable puts Claude Code itself on API billing.
 

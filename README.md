@@ -144,7 +144,7 @@ Then update the plugin from your terminal:
 claude plugin update scout@tenzoki-plugins
 ```
 
-Restart Claude Code afterwards to load the new version. If you use the depth layer and the release changes its registered command, re-run `/scout:setup` as well (see [After an update](#after-an-update-re-run-scoutsetup-when-the-registered-command-changed)); coming from a version before 0.6.3, it does (see [Upgrading to 0.6.3 or later](#upgrading-to-063-or-later)).
+Restart Claude Code afterwards to load the new version. If you use the depth layer and the release changes its registered command, re-run `/scout:setup` as well (see [After an update](#after-an-update-re-run-scoutsetup-when-the-registered-command-changed)); coming from a version before 0.6.5, it does (see [Upgrading to 0.6.3 or later](#upgrading-to-063-or-later)).
 
 ### Two copies: launcher and marketplace
 
@@ -171,6 +171,8 @@ Two things changed in 0.6.0 that an existing install does not pick up by itself:
 ## Upgrading to 0.6.3 or later
 
 If you use the depth layer (browser-use), re-register it once after updating to 0.6.3 or later: run `/scout:setup`, or `scout --key "$BROWSERUSE_ANTHROPIC_KEY"` from the launcher. 0.6.3 added three arguments to the registered command (`--python 3.12`, `--with mcp==1.30.0`, `--with pydantic-settings==2.16.1`). A registration written before 0.6.3 lacks them and can fail to start on a fresh environment (an old system Python, or `mcp` 2.x). `claude mcp get browser-use` shows whether yours carries them.
+
+0.6.5 changes the registration again: it adds two env vars, `TIMEOUT_BrowserStartEvent=120` and `TIMEOUT_BrowserLaunchEvent=120`, which give a first browser start (one that downloads Chrome) two minutes instead of 30 seconds. So after updating to 0.6.5, re-run `/scout:setup` (or `scout --key "$BROWSERUSE_ANTHROPIC_KEY"`) once more, even if you already re-registered on 0.6.3 or 0.6.4. `claude mcp get browser-use` then lists both under `Environment:`.
 
 ## scout's state directory
 
@@ -349,6 +351,8 @@ The depth layer lets scout drive a **real local Chromium browser** for pages the
 
 It is **entirely optional**. If you never register it, scout runs breadth-only and records any page that genuinely needs an interactive browser as a "needs depth tools" gap in the report's blocked-sources table — never silently dropped. Register it only if you actually hit such pages.
 
+**Install Google Chrome before your first depth run.** browser-use uses an installed Google Chrome (or Chromium) when it finds one. Without one, its first start downloads Chrome through Playwright, which is slow and can take minutes. The registration gives a browser start 120 seconds instead of browser-use's default 30, but an installed Chrome avoids the wait altogether.
+
 ### Wire the depth layer at install time (keeps your session on subscription auth)
 
 The fastest way to wire the depth layer is to set `BROWSERUSE_ANTHROPIC_KEY` **before** the install/update one-liner. The installer then pins that key into the browser-use MCP server for you — no separate `/scout:setup` step:
@@ -387,7 +391,7 @@ Run with neither variable on an interactive terminal and it offers inherit (when
 
 ### After an update, re-run `/scout:setup` when the registered command changed
 
-The shim copy and the registered command are refreshed only when the registration runs. Updating scout, by either route, leaves the old copy and the old registration in place. Whenever a scout release changes the registered command — the shim, the browser-use pin, or any other argument — re-run `/scout:setup` (or `scout --key "$BROWSERUSE_ANTHROPIC_KEY"`, or the register script) once. An un-refreshed registration keeps working only while nothing it lacks is needed; 0.6.3 is a release where that does not hold (see [Upgrading to 0.6.3 or later](#upgrading-to-063-or-later)).
+The shim copy and the registered command are refreshed only when the registration runs. Updating scout, by either route, leaves the old copy and the old registration in place. Whenever a scout release changes the registered command — the shim, the browser-use pin, or any other argument — re-run `/scout:setup` (or `scout --key "$BROWSERUSE_ANTHROPIC_KEY"`, or the register script) once. An un-refreshed registration keeps working only while nothing it lacks is needed; 0.6.3 and 0.6.5 are releases where that does not hold (see [Upgrading to 0.6.3 or later](#upgrading-to-063-or-later)).
 
 ### Manual registration
 
@@ -418,6 +422,8 @@ Then add this to your Claude Code MCP settings, with `<state dir>` replaced by t
       "env": {
         "ANTHROPIC_API_KEY": "<your own Anthropic API key>",
         "SCOUT_DEPTH_PROVIDER": "anthropic",
+        "TIMEOUT_BrowserStartEvent": "120",
+        "TIMEOUT_BrowserLaunchEvent": "120",
         "ANONYMIZED_TELEMETRY": "False",
         "BROWSER_USE_VERSION_CHECK": "false"
       }
@@ -426,7 +432,7 @@ Then add this to your Claude Code MCP settings, with `<state dir>` replaced by t
 }
 ```
 
-The pin is `0.11.9` — the version scout's depth layer is built and verified against. A version bump is a deliberate, tested change, not an automatic track. The `--from "browser-use[cli]@0.11.9" python <shim>` form runs the exact tested browser-use, but launches scout's thin shim inside that environment so extraction lands on Anthropic. The other three arguments pin what browser-use itself leaves open: `--python 3.12` (browser-use needs Python 3.11 or newer; uv uses an installed 3.12 or downloads one, so macOS's system 3.9 is never picked), `--with mcp==1.30.0` (browser-use accepts any `mcp`, but `mcp` 2.x breaks its MCP server at start) and `--with pydantic-settings==2.16.1` (browser-use imports it without declaring it). Both no-cloud env vars stay in this snippet — keep them in every one. (`SCOUT_DEPTH_EXTRACT_MODEL` is optional; it overrides the default `claude-haiku-4-5` extraction model. `SCOUT_DEPTH_EXTRACT_TEMPERATURE` is optional too: a number in `[0, 1]`, always sent when set. A temperature that is not a number in `[0, 1]` is treated as unset, with a note on stderr. Unset, the shim sends `0` with the default model, because extraction reads page text back rather than generating it; with `SCOUT_DEPTH_EXTRACT_MODEL` set it sends no temperature, so the API default applies: some models reject non-default sampling values, and scout cannot know what an operator-chosen model accepts. An override must be a model whose reply starts with a text block (for example `claude-haiku-4-5`): browser-use `0.11.9`'s extraction reads only the first content block of the reply, so a model that thinks by default would hand back its thinking block instead of the extract. Current models that think by default (for example the Sonnet 5 family) are unsuitable, because browser-use `0.11.9`'s `ChatAnthropic` cannot turn thinking off. `register-browser-use.sh` forwards either variable into the registration when it is set in its environment, and refuses a temperature that is not a decimal number in `[0, 1]`.)
+The pin is `0.11.9` — the version scout's depth layer is built and verified against. A version bump is a deliberate, tested change, not an automatic track. The `--from "browser-use[cli]@0.11.9" python <shim>` form runs the exact tested browser-use, but launches scout's thin shim inside that environment so extraction lands on Anthropic. The other three arguments pin what browser-use itself leaves open: `--python 3.12` (browser-use needs Python 3.11 or newer; uv uses an installed 3.12 or downloads one, so macOS's system 3.9 is never picked), `--with mcp==1.30.0` (browser-use accepts any `mcp`, but `mcp` 2.x breaks its MCP server at start) and `--with pydantic-settings==2.16.1` (browser-use imports it without declaring it). The two `TIMEOUT_*` env vars raise browser-use's 30-second limit on starting and launching the browser to 120 seconds, so a first start that downloads Chrome does not time out. Both no-cloud env vars stay in this snippet — keep them in every one. (`SCOUT_DEPTH_EXTRACT_MODEL` is optional; it overrides the default `claude-haiku-4-5` extraction model. `SCOUT_DEPTH_EXTRACT_TEMPERATURE` is optional too: a number in `[0, 1]`, always sent when set. A temperature that is not a number in `[0, 1]` is treated as unset, with a note on stderr. Unset, the shim sends `0` with the default model, because extraction reads page text back rather than generating it; with `SCOUT_DEPTH_EXTRACT_MODEL` set it sends no temperature, so the API default applies: some models reject non-default sampling values, and scout cannot know what an operator-chosen model accepts. An override must be a model whose reply starts with a text block (for example `claude-haiku-4-5`): browser-use `0.11.9`'s extraction reads only the first content block of the reply, so a model that thinks by default would hand back its thinking block instead of the extract. Current models that think by default (for example the Sonnet 5 family) are unsuitable, because browser-use `0.11.9`'s `ChatAnthropic` cannot turn thinking off. `register-browser-use.sh` forwards either variable into the registration when it is set in its environment, and refuses a temperature that is not a decimal number in `[0, 1]`.)
 
 ### Both no-cloud environment variables are mandatory
 
@@ -542,7 +548,7 @@ Default is English. scout ships professional-voice style profiles (for the repor
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) v2.0.12 or higher.
 - That's it for the breadth layer — no Node, no Python, no Docker, and no git with the one-line installer (the marketplace route fetches through git).
-- The optional depth layer adds its own requirements: `uvx` (from [uv](https://github.com/astral-sh/uv)) to run browser-use locally, an Anthropic API key set as `BROWSERUSE_ANTHROPIC_KEY` (extraction runs on Anthropic via scout's shim), and a local Chromium that browser-use manages. See **Optional depth layer (browser-use)** above. None of this is needed for breadth.
+- The optional depth layer adds its own requirements: `uvx` (from [uv](https://github.com/astral-sh/uv)) to run browser-use locally, an Anthropic API key set as `BROWSERUSE_ANTHROPIC_KEY` (extraction runs on Anthropic via scout's shim), and a local Chromium that browser-use manages (install Google Chrome first, so the first start does not have to download one). See **Optional depth layer (browser-use)** above. None of this is needed for breadth.
 - The optional SearXNG meta backend needs `npx` (from [Node.js](https://nodejs.org)) to run the MCP, and **Docker** to run the container via `scout meta` or `/scout:meta`; the first start also needs `openssl` to generate the secret. Docker is needed **only** for `meta` — never for the default `scout` path. See **Optional metasearch backend (SearXNG)** above.
 
 ## License
