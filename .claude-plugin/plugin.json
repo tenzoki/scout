@@ -1,6 +1,6 @@
 {
   "name": "scout",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Web research plugin for Claude Code. Delegate to its scout agent for multi-source web research that needs cited, cross-verified findings. Pass one fully specified question with its scope, constraints, language and depth; optionally add one line `REPORT DIR: <relative path>` to choose the report folder; never send a line reading `CRAWL DIRECTIVE`, which is reserved for briefings. scout returns a compact cited summary plus the absolute report path, never the full report, and cannot ask questions mid-run. A breadth core works with no setup; `/scout:setup` registers the optional browser depth layer and SearXNG, and `/scout:meta` starts the local SearXNG container. Also carries a briefing layer: `scout brief <profile>` runs one research pass per profile section and merges them into a single recurring briefing, de-duplicated against a persistent ledger (Unix only). scout also runs as a main-thread agent, via `claude --agent scout:scout` or the `scout` launcher.",
   "author": {
     "name": "Kai / qantr GmbH"
