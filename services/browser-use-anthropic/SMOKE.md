@@ -46,7 +46,7 @@ exercises the import guard and the Anthropic patch without involving Claude Code
 or a registration.
 
 ```bash
-ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY SCOUT_DEPTH_PROVIDER=anthropic ANONYMIZED_TELEMETRY=False BROWSER_USE_VERSION_CHECK=false uvx --from "browser-use[cli]@0.11.9" python <plugin>/services/browser-use-anthropic/scout_browseruse_anthropic.py --mcp
+ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY SCOUT_DEPTH_PROVIDER=anthropic ANONYMIZED_TELEMETRY=False BROWSER_USE_VERSION_CHECK=false uvx --python 3.12 --from "browser-use[cli]@0.11.9" --with "mcp==1.30.0" --with "pydantic-settings==2.16.1" python <plugin>/services/browser-use-anthropic/scout_browseruse_anthropic.py --mcp
 ```
 
 Confirm:

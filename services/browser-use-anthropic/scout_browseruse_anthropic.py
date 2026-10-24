@@ -16,7 +16,7 @@ dependency, so the shim needs zero extra packages — it runs inside the same
 `uvx --from "browser-use[cli]@0.11.9"` environment.
 
 Launch:
-    uvx --from "browser-use[cli]@0.11.9" python scout_browseruse_anthropic.py --mcp
+    uvx --python 3.12 --from "browser-use[cli]@0.11.9" --with "mcp==1.30.0" --with "pydantic-settings==2.16.1" python scout_browseruse_anthropic.py --mcp
 
 Environment:
     SCOUT_DEPTH_PROVIDER       anthropic (default) selects the patch; any other

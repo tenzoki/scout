@@ -63,6 +63,22 @@ set -u
 set -o pipefail
 
 PIN="browser-use[cli]@0.11.9"
+# The pin alone does not reproduce the tested environment; three more uvx
+# arguments do, and each is part of the pin discipline (a bump is a tested change):
+#   PYTHON  browser-use 0.11.9 requires Python >=3.11,<4.0. uvx otherwise takes
+#           the first interpreter it finds, which on macOS is the system 3.9.6.
+#           An exact minor makes uv use an installed 3.12 or download a managed
+#           one; 3.12 is the version this stack is tested on (a >=3.11 range
+#           would float to whatever is newest and re-open the question).
+#   MCP_PIN browser-use declares `mcp>=1.10.1` with no upper bound. mcp 2.x
+#           removed the low-level `Server.list_tools()` decorator that
+#           browser_use/mcp/server.py uses, so the server dies at start.
+#   PS_PIN  browser_use/config.py imports pydantic_settings without declaring
+#           it; mcp 1.x pulled it in, mcp 2.x does not. Pinned explicitly so
+#           the import does not depend on another package's dependency list.
+PYTHON="3.12"
+MCP_PIN="mcp==1.30.0"
+PS_PIN="pydantic-settings==2.16.1"
 
 # The source shim is resolved from this script's own location, so it is correct
 # in any plugin copy (launcher, marketplace cache, source tree). It is only ever
@@ -205,7 +221,7 @@ if [ "$INHERIT" -eq 1 ]; then
   # No ANTHROPIC_API_KEY entry: the running session inherits it from the
   # environment. The shim still runs (SCOUT_DEPTH_PROVIDER=anthropic) and both
   # no-cloud env vars are passed.
-  claude mcp add-json browser-use -s user '{ "type": "stdio", "command": "uvx", "args": ["--from", "'"$PIN"'", "python", "'"$SHIM_PATH"'", "--mcp"], "env": { "SCOUT_DEPTH_PROVIDER": "anthropic", '"$OPT_JSON"'"ANONYMIZED_TELEMETRY": "False", "BROWSER_USE_VERSION_CHECK": "false" } }' || add_failed
+  claude mcp add-json browser-use -s user '{ "type": "stdio", "command": "uvx", "args": ["--python", "'"$PYTHON"'", "--from", "'"$PIN"'", "--with", "'"$MCP_PIN"'", "--with", "'"$PS_PIN"'", "python", "'"$SHIM_PATH"'", "--mcp"], "env": { "SCOUT_DEPTH_PROVIDER": "anthropic", '"$OPT_JSON"'"ANONYMIZED_TELEMETRY": "False", "BROWSER_USE_VERSION_CHECK": "false" } }' || add_failed
   # Inherit-mode runtime contract: the key is read from the launching shell's
   # environment when the MCP server starts, not from this config. Say so plainly
   # so a green registration is not mistaken for a working depth layer.
@@ -219,9 +235,10 @@ if [ "$INHERIT" -eq 1 ]; then
   echo "BROWSERUSE_ANTHROPIC_KEY=sk-ant-... to pin the key into the user-scope config."
 else
   # Flag form keeps the key out of a JSON blob and matches the skill's documented
-  # mechanism. The shim runs inside the pinned browser-use env via `--from`.
+  # mechanism. The shim runs inside the pinned browser-use env via `--from`,
+  # on the pinned Python and with the two pinned `--with` packages.
   # `${OPT_FLAGS[@]+...}` keeps an empty array from tripping `set -u` on bash 3.2.
-  claude mcp add browser-use uvx -s user -e ANTHROPIC_API_KEY="$KEY" -e SCOUT_DEPTH_PROVIDER=anthropic ${OPT_FLAGS[@]+"${OPT_FLAGS[@]}"} -e ANONYMIZED_TELEMETRY=False -e BROWSER_USE_VERSION_CHECK=false -- --from "$PIN" python "$SHIM_PATH" --mcp || add_failed
+  claude mcp add browser-use uvx -s user -e ANTHROPIC_API_KEY="$KEY" -e SCOUT_DEPTH_PROVIDER=anthropic ${OPT_FLAGS[@]+"${OPT_FLAGS[@]}"} -e ANONYMIZED_TELEMETRY=False -e BROWSER_USE_VERSION_CHECK=false -- --python "$PYTHON" --from "$PIN" --with "$MCP_PIN" --with "$PS_PIN" python "$SHIM_PATH" --mcp || add_failed
 fi
 
 echo
@@ -234,8 +251,17 @@ case "$VERIFY_OUT" in
   *"$SHIM_PATH"*) echo "shim path: ok ($SHIM_PATH)" ;;
   *) echo "Stopping: the registered browser-use entry is missing or does not name the shim copy $SHIM_PATH. Re-run /scout:setup." >&2; exit 1 ;;
 esac
+# An entry without the Python and dependency pins starts on an unsuitable
+# interpreter or an incompatible mcp, so it is a failed registration too.
+for want in "--python $PYTHON " "--with $MCP_PIN " "--with $PS_PIN "; do
+  case "$VERIFY_OUT" in
+    *"$want"*) ;;
+    *) echo "Stopping: the registered browser-use entry does not carry '${want% }', so the server would not start reproducibly. Re-run /scout:setup." >&2; exit 1 ;;
+  esac
+done
+echo "python and dependency pins: ok ($PYTHON, $MCP_PIN, $PS_PIN)"
 case "$VERIFY_OUT" in
   */plugins/cache/*) echo "Stopping: the registered entry names a path under /plugins/cache/, which the next plugin update deletes. Re-run /scout:setup." >&2; exit 1 ;;
 esac
 echo
-echo "Done. If the entry shows Type: stdio, Command: uvx, the --from pin + shim path + --mcp args, SCOUT_DEPTH_PROVIDER=anthropic, and the two no-cloud env vars, depth is registered. Re-run scout."
+echo "Done. If the entry shows Type: stdio, Command: uvx, the --python, --from and two --with pins + shim path + --mcp args, SCOUT_DEPTH_PROVIDER=anthropic, and the two no-cloud env vars, depth is registered. Re-run scout."

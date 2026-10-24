@@ -120,7 +120,10 @@ In the JSON, replace `<state dir>` with the absolute path that state directory e
     "browser-use": {
       "command": "uvx",
       "args": [
+        "--python", "3.12",
         "--from", "browser-use[cli]@0.11.9",
+        "--with", "mcp==1.30.0",
+        "--with", "pydantic-settings==2.16.1",
         "python", "<state dir>/browser-use-anthropic/scout_browseruse_anthropic.py",
         "--mcp"
       ],
@@ -139,7 +142,7 @@ Do not guess a different registration command. Use the script, or the manual JSO
 
 ## Step 5 — Confirm the registration took
 
-The script ends by running `claude mcp get browser-use` and printing the result. Read its output: it should show `Type: stdio`, `Command: uvx`, args including `--from`, `browser-use[cli]@0.11.9`, the shim path `<state dir>/browser-use-anthropic/scout_browseruse_anthropic.py` (by default `~/.local/state/scout/browser-use-anthropic/scout_browseruse_anthropic.py`, never a path under `~/.claude/plugins/cache/` or inside `~/.scout`), and `--mcp`, and the env carrying `SCOUT_DEPTH_PROVIDER`, `ANONYMIZED_TELEMETRY`, and `BROWSER_USE_VERSION_CHECK`. Do not print any `ANTHROPIC_API_KEY` value from this output. The script exits non-zero when `claude mcp add` failed, when the verified entry is missing or does not name the shim copy, or when it names a path under `/plugins/cache/` (a file a plugin update deletes). Read the exit code: on non-zero, the registration did not take — report the script's `Stopping:` line and stop so the user can retry, rather than reporting a false success. Note that the old entry is removed before the add, so a failed add leaves no browser-use registration at all.
+The script ends by running `claude mcp get browser-use` and printing the result. Read its output: it should show `Type: stdio`, `Command: uvx`, args including `--python 3.12`, `--from`, `browser-use[cli]@0.11.9`, `--with mcp==1.30.0`, `--with pydantic-settings==2.16.1`, the shim path `<state dir>/browser-use-anthropic/scout_browseruse_anthropic.py` (by default `~/.local/state/scout/browser-use-anthropic/scout_browseruse_anthropic.py`, never a path under `~/.claude/plugins/cache/` or inside `~/.scout`), and `--mcp`, and the env carrying `SCOUT_DEPTH_PROVIDER`, `ANONYMIZED_TELEMETRY`, and `BROWSER_USE_VERSION_CHECK`. Do not print any `ANTHROPIC_API_KEY` value from this output. The script exits non-zero when `claude mcp add` failed, when the verified entry is missing, does not name the shim copy or lacks one of the three pins above, or when it names a path under `/plugins/cache/` (a file a plugin update deletes). Read the exit code: on non-zero, the registration did not take — report the script's `Stopping:` line and stop so the user can retry, rather than reporting a false success. Note that the old entry is removed before the add, so a failed add leaves no browser-use registration at all.
 
 On success, tell the user: depth is registered. Re-run scout — pages that need an interactive browser will now be driven in a real local Chromium, and depth findings will carry the `depth (browser-use, manual drive)` method tag in the report. If they registered via inherit, remind them once more that the depth layer only works when `ANTHROPIC_API_KEY` is live in the shell that launches scout/Claude Code — a green registration alone does not prove the key is reachable at runtime.
 
