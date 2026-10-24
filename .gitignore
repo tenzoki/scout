@@ -10,6 +10,9 @@ fusion-workbench/
 # hide a same-named file elsewhere in the plugin tree.
 CLAUDE.md
 /activity-log-*.md
+# Local fusion tooling files (project config, union-merge attribute); git still honours an ignored .gitattributes.
+/.gitattributes
+/fusion.json
 
 # IDE / OS noise
 .DS_Store
