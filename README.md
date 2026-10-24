@@ -63,7 +63,7 @@ Do not declare scout in your plugin's `dependencies`. That field is a hard depen
 
 ## Quick start with the launcher (one line, no git)
 
-scout installs two ways, and both are supported: this one-line installer, which also gives you the `scout` command, and the [Claude Code marketplace](#install-through-the-claude-code-marketplace). Read [Two copies](#two-copies-launcher-and-marketplace) before you use both.
+scout installs two ways, and both are supported: the [Claude Code marketplace](#install-through-the-claude-code-marketplace), which is the primary route and the only one on [Windows](#windows), and this one-line installer for mac and Linux, which also gives you the `scout` command. Read [Two copies](#two-copies-launcher-and-marketplace) before you use both.
 
 In your terminal:
 
@@ -96,67 +96,26 @@ Both forms also accept the equals spelling (`--key=sk-ant-...`). The key is expo
 - **Security caveat.** A key passed in `argv` can land in your shell history and is visible in `ps aux` while the command runs. On a shared machine, prefer the env-prefix form `BROWSERUSE_ANTHROPIC_KEY=sk-ant-... scout --update` or the register script's hidden interactive prompt (`bash ~/.scout/skills/setup/register-browser-use.sh`) instead.
 - **Bootstrap quirk (first time only).** `--key` is parsed by the *currently installed* launcher, so the very first update from a launcher that predates this flag won't recognise it. Do that one update with the env-prefix form — `BROWSERUSE_ANTHROPIC_KEY=sk-ant-... scout --update` — and from then on `--key` works.
 
-## Quick start (Windows)
-
-Windows gets the same no-git path. Paste this one line into **cmd.exe** or
-**PowerShell**:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/tenzoki/scout/main/install.ps1 | iex"
-```
-
-Prefer not to type? Download the repo's `install.cmd` and **double-click it** —
-it confirms the one prerequisite, then runs the exact same one-liner.
-
-This downloads scout over plain HTTPS into `%USERPROFILE%\.scout` and installs a
-`scout` launcher on your **User PATH**. No git, no SSH, no Claude Code
-marketplace — the only thing you need already installed is the Claude Code CLI.
-The `irm | iex` form runs in memory, so it is not blocked by the default
-PowerShell ExecutionPolicy that gates `.ps1` files on disk. Then, in any project
-folder:
-
-```powershell
-scout          # starts Claude Code with the scout agent loaded
-```
-
-- **Update:** `scout --update` (or re-run the one-liner above).
-- **Uninstall:** `scout --uninstall`.
-- **Where it lives:** `scout --where` (prints the install dir).
-
-The launcher is added to your User PATH automatically; open a **new** terminal
-after installing so the `scout` command is visible everywhere.
-
 ### Where scout installs
 
 The one-line installer itself writes to two places — both in your home folder, nothing system-wide and nothing inside Claude Code's plugin cache:
 
 ```
 ~/.local/bin/scout      the `scout` command (a thin launcher script)
-~/.scout/               the plugin files: .claude-plugin/, agents/,
-                        stilwerk/, README, LICENSE
+~/.scout/               the plugin files: .claude-plugin/, agents/, briefing/,
+                        skills/, services/, stilwerk/, README.md, LICENSE
 ```
 
-The launcher is one line — `claude --plugin-dir ~/.scout --agent scout:scout "$@"` — so every run loads the plugin straight from `~/.scout`. That is why update and uninstall are reliable: there is no cache to get out of sync. `scout --where` prints the plugin path any time. The optional depth layer and SearXNG backend keep their files in a third place, [scout's state directory](#scouts-state-directory), which `scout --update` does not touch. The installer writes there too when you set `BROWSERUSE_ANTHROPIC_KEY`, because it then registers the depth layer.
+The launcher handles its own commands (`--update`, `--uninstall`, `--where`, `--key`, `brief`, `meta`) and otherwise runs `claude --plugin-dir ~/.scout --agent scout:scout "$@"`, so every run loads the plugin straight from `~/.scout`. That is why update and uninstall are reliable: there is no cache to get out of sync. `scout --where` prints the plugin path any time. The optional depth layer and SearXNG backend keep their files in a third place, [scout's state directory](#scouts-state-directory), which `scout --update` does not touch. The installer writes there too when you set `BROWSERUSE_ANTHROPIC_KEY`, because it then registers the depth layer.
 
-On **Windows**, the layout mirrors the home-folder convention:
+Both locations are overridable with environment variables before installing:
 
-```
-%USERPROFILE%\.local\bin\scout.cmd   the `scout` command (a thin launcher)
-%USERPROFILE%\.scout\                the plugin files: .claude-plugin\, agents\,
-                                     skills\, services\, stilwerk\, README, LICENSE
-```
+- `SCOUT_HOME` — where the plugin files go (default `~/.scout`)
+- `SCOUT_BIN` — where the `scout` launcher goes (default `~/.local/bin`)
 
-`%USERPROFILE%\.local\bin` is added to your **User PATH** automatically (no admin
-needed). `scout --where` prints the plugin path; `scout --uninstall` removes the
-install dir and the launcher.
+The launcher remembers both, so `scout --update` reinstalls into the same places without the variables being set again.
 
-Both locations are overridable with environment variables before installing
-(set them before the one-liner on Windows too):
-
-- `SCOUT_HOME` — where the plugin files go (default `~/.scout`, or `%USERPROFILE%\.scout` on Windows)
-- `SCOUT_BIN` — where the `scout` launcher goes (default `~/.local/bin`, or `%USERPROFILE%\.local\bin` on Windows)
-
-`scout --uninstall` removes `~/.scout` and the launcher. On mac and Linux it also removes the SearXNG container and scout's folders in its [state directory](#scouts-state-directory), naming each one as it goes. It leaves the MCP registrations in place, because they live in Claude Code's own config; [Remove scout completely](#remove-scout-completely) lists the commands for those.
+`scout --uninstall` removes `~/.scout` and the launcher. It also removes the SearXNG container and scout's folders in its [state directory](#scouts-state-directory), naming each one as it goes. It leaves the MCP registrations in place, because they live in Claude Code's own config; [Remove scout completely](#remove-scout-completely) lists the commands for those.
 
 ## Install through the Claude Code marketplace
 
@@ -196,6 +155,12 @@ With both installs on one machine you have **two separate copies of scout**, and
 
 So a fix you pulled with one command is missing from sessions that load the other copy. Keep one install, or update both together. Both copies share one [state directory](#scouts-state-directory), so the depth-layer registration and the SearXNG secret are the same whichever copy you run.
 
+## Windows
+
+There is no Windows launcher. On Windows, install scout through the [Claude Code marketplace](#install-through-the-claude-code-marketplace) and use `/scout:setup` and `/scout:meta` inside a Claude Code session. Both run the same bash scripts as on mac and Linux, under the Git Bash that Claude Code uses on Windows. The launcher's commands — `scout brief`, `scout --key`, and `scout meta` as a shell command — exist only on mac and Linux.
+
+**This Windows path has not yet been tested on a Windows machine.** If you try it, expect rough edges and please report what you find at [github.com/tenzoki/scout/issues](https://github.com/tenzoki/scout/issues).
+
 ## Upgrading from 0.5.0
 
 Two things changed in 0.6.0 that an existing install does not pick up by itself:
@@ -222,8 +187,6 @@ scout writes two subfolders there and drops a `.scout-owned` marker file into ea
 ~/.local/state/scout/searxng/docker-compose.yml                            copied on every start
 ~/.local/state/scout/*/.scout-owned                                        marker: scout wrote this folder
 ```
-
-The state directory applies to the mac and Linux scripts. The Windows launcher still keeps the shim and the SearXNG secret inside `%USERPROFILE%\.scout`.
 
 ## Where the report lands
 
@@ -369,27 +332,12 @@ The launcher hands the orchestrator's exit code straight through to whatever sta
 | `0` | A briefing was written | Nothing. Read the file. |
 | `1` | The run reached the merge and no usable briefing came out of it | Alert. The log holds the merge's error output. |
 | `2` | The run stopped before a briefing was possible — a bad argument, an unusable profile, a missing script | Fix the invocation or the profile; retrying unchanged will fail the same way. |
-| `3` | Windows only: `scout brief` refused (see below) | Run it under WSL or Git Bash instead. |
 
 Per-section outcomes never change the exit code. A run whose every section failed still merges, still writes a briefing and **still exits 0** — the per-section verdicts (`succeeded`, `timed out`, `failed — exceeded its budget`, `failed — not authenticated`, `failed — rate limited, over the usage limit, or out of credit`, `failed`) are in the briefing's run-figures table and failure notes, and a wrapper that wants to act on them reads the file.
 
-### Windows
+### Briefings need the launcher
 
-The briefing assets install normally: `%USERPROFILE%\.scout\briefing\` contains the scripts and the examples after any install or update. But **`scout brief` on Windows refuses and exits 3.** The orchestrator is a bash script and no PowerShell counterpart ships in this release; exit 3 sits deliberately outside the 0/1/2 contract above, so a wrapper can never read the refusal as a real briefing outcome.
-
-To produce a briefing on a Windows machine, run the script directly under WSL or Git Bash, pointing at the installed copy:
-
-```bash
-# Git Bash (~ is %USERPROFILE%)
-bash ~/.scout/briefing/scout-brief.sh /path/to/profile.md
-
-# WSL (your Windows home is under /mnt/c)
-bash /mnt/c/Users/<you>/.scout/briefing/scout-brief.sh /path/to/profile.md
-```
-
-Both need the `claude` CLI available inside that shell, since the script dispatches through it. `scout --where` prints the install directory if you moved it.
-
-Every other scout command works normally on Windows.
+`scout brief` is a launcher command, so it needs the mac/Linux launcher install. A marketplace install, and so every [Windows](#windows) install, has no `scout brief`.
 
 ## Optional depth layer (browser-use)
 
@@ -406,17 +354,12 @@ The fastest way to wire the depth layer is to set `BROWSERUSE_ANTHROPIC_KEY` **b
 BROWSERUSE_ANTHROPIC_KEY=sk-ant-... curl -fsSL https://raw.githubusercontent.com/tenzoki/scout/main/install.sh | bash
 ```
 
-```powershell
-# Windows (cmd.exe or PowerShell)
-$env:BROWSERUSE_ANTHROPIC_KEY="sk-ant-..."; irm https://raw.githubusercontent.com/tenzoki/scout/main/install.ps1 | iex
-```
-
 This pins the key into the **browser-use MCP server only** — so you do **not** export `ANTHROPIC_API_KEY` in your shell. Your scout session stays on claude.ai-subscription/OAuth auth and **Remote Control keeps working** (an exported `ANTHROPIC_API_KEY` would flip the whole session to API-key auth and disable both — see the inherit-vs-pin note under [You need your own Anthropic API key](#you-need-your-own-anthropic-api-key) and the registration notes below).
 
 - **Optional.** scout's breadth core needs no key; leave the var unset and install/update behave exactly as before, touching no existing browser-use registration.
 - **Best-effort.** If a prerequisite is missing (`uvx`, the `claude` CLI), the installer warns and still finishes — the breadth core is installed regardless.
-- **Rotate the key** by re-running update with the var set: `BROWSERUSE_ANTHROPIC_KEY=sk-ant-new scout --update` (`$env:BROWSERUSE_ANTHROPIC_KEY="sk-ant-new"; scout --update` on Windows). A plain update with the var unset leaves the existing registration alone. On mac/Linux you can also use the launcher flag — `scout --update --key sk-ant-new` to update and rotate, or `scout --key sk-ant-new` to rotate without re-downloading (see [Pin or rotate the depth-layer key with `--key`](#pin-or-rotate-the-depth-layer-key-with---key); the env-prefix form is safer on shared machines because an argv key is visible in `ps aux` and shell history).
-- **Caveat.** The pinned key is stored in plaintext in your user-scope MCP config (`~/.claude.json`, or `%USERPROFILE%\.claude.json` on Windows).
+- **Rotate the key** by re-running update with the var set: `BROWSERUSE_ANTHROPIC_KEY=sk-ant-new scout --update`. A plain update with the var unset leaves the existing registration alone. You can also use the launcher flag — `scout --update --key sk-ant-new` to update and rotate, or `scout --key sk-ant-new` to rotate without re-downloading (see [Pin or rotate the depth-layer key with `--key`](#pin-or-rotate-the-depth-layer-key-with---key); the env-prefix form is safer on shared machines because an argv key is visible in `ps aux` and shell history).
+- **Caveat.** The pinned key is stored in plaintext in your user-scope MCP config (`~/.claude.json`).
 
 ### Register the MCP server
 
@@ -548,8 +491,6 @@ SearXNG needs both an MCP registration and a running container:
 
    Both run the same script, `services/searxng/start-searxng.sh`. First it replaces a `scout-searxng` container left by an older scout (one from another compose project), once, and says so. A scout container that already answers a JSON search on port 8911 is then left running as it is; if something else answers on that port, the script stops and says so. Otherwise it renders the settings and copies the compose file into scout's [state directory](#scouts-state-directory), runs `docker compose up -d` against that copy, and waits up to 30 seconds for SearXNG to answer. Because the container mounts the files in the state directory, it keeps running after the plugin copy it was started from is updated. If Docker is missing, an old container cannot be removed, the container fails to start, or the health-wait times out, `scout meta` prints a plain message naming the cause and launches scout with `WebSearch` instead — it never hard-fails. `/scout:meta` relays the same cause and says that scout falls back to `WebSearch`. The container runs until you stop it with `docker stop scout-searxng`.
 
-   **`scout meta` works on Windows too**, with the same behaviour: it needs **Docker Desktop** (checked when you run `scout meta`, not at install time), generates the `secret_key` with Windows-native crypto instead of openssl, and falls back to `WebSearch` on any failure — Docker absent, container start fails, or health-wait times out.
-
 The rule is one rule: whenever the `searxng` MCP is registered **and** the container answers, scout discovers through it — in plain `scout` runs, `scout meta` runs and dispatches from other agents alike, whoever started the container. `meta` only starts the container. Each source in the report then carries a `discovery: searxng` note; otherwise sources carry `discovery: websearch`. The container restarts with Docker until you stop it, so to send every run back to `WebSearch`, run `docker stop scout-searxng`.
 
 ### `json` output is required
@@ -558,7 +499,7 @@ The bundled SearXNG settings enable `json` output (`search.formats: [html, json]
 
 ### The secret is generated per deployment — never shipped
 
-SearXNG needs a `server.secret_key`. scout **does not ship one** — the committed `settings.yml` carries an empty `secret_key`, and the start script never writes to it. On mac/Linux, the first start (`scout meta` or `/scout:meta`) generates a key with `openssl rand -hex 32` into `~/.local/state/scout/searxng/secret_key` (mode 600). Every start then renders `~/.local/state/scout/searxng/config/settings.yml` from the shipped template with that key filled in, so the key survives `scout --update` and plugin updates. A template change in a new release reaches the container only after it restarts from the new file: a running container keeps the settings it started with, so run `docker stop scout-searxng` and then start it again. On Windows the launcher generates the key with Windows-native crypto (`System.Security.Cryptography`), since openssl is not present by default, into the installed copy at `%USERPROFILE%\.scout\services\searxng\config\settings.yml`. The repo never contains a real secret, and every deployment gets its own.
+SearXNG needs a `server.secret_key`. scout **does not ship one** — the committed `settings.yml` carries an empty `secret_key`, and the start script never writes to it. The first start (`scout meta` or `/scout:meta`) generates a key with `openssl rand -hex 32` into `~/.local/state/scout/searxng/secret_key` (mode 600). Every start then renders `~/.local/state/scout/searxng/config/settings.yml` from the shipped template with that key filled in, so the key survives `scout --update` and plugin updates. A template change in a new release reaches the container only after it restarts from the new file: a running container keeps the settings it started with, so run `docker stop scout-searxng` and then start it again. The repo never contains a real secret, and every deployment gets its own.
 
 The bundled settings also set `limiter: false`, which is fine for single-user localhost. If you expose this SearXNG on a shared or public host, re-enable the limiter.
 
@@ -595,7 +536,7 @@ docker rm -f scout-searxng
 rm -rf ~/.local/state/scout
 ```
 
-On mac and Linux, `scout --uninstall` already removes the container and the state directory's two subfolders, `browser-use-anthropic/` and `searxng/`. In a directory you chose with `SCOUT_STATE_DIR` it removes a subfolder only if it carries scout's `.scout-owned` marker, and names any it leaves. It then removes the state directory only if it is empty, so other files in that directory are left alone. A marketplace copy on the same machine shares those subfolders, so re-run `/scout:setup` there afterwards if you keep it. Run only the lines for the parts you set up; a line for something that is not there fails harmlessly. If you set `SCOUT_STATE_DIR`, remove scout's subfolders in that directory instead of `~/.local/state/scout`.
+`scout --uninstall` already removes the container and the state directory's two subfolders, `browser-use-anthropic/` and `searxng/`. In a directory you chose with `SCOUT_STATE_DIR` it removes a subfolder only if it carries scout's `.scout-owned` marker, and names any it leaves. It then removes the state directory only if it is empty, so other files in that directory are left alone. A marketplace copy on the same machine shares those subfolders, so re-run `/scout:setup` there afterwards if you keep it. Run only the lines for the parts you set up; a line for something that is not there fails harmlessly. If you set `SCOUT_STATE_DIR`, remove scout's subfolders in that directory instead of `~/.local/state/scout`.
 
 ## Language
 
@@ -606,7 +547,7 @@ Default is English. scout ships professional-voice style profiles (for the repor
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) v2.0.12 or higher.
 - That's it for the breadth layer — no Node, no Python, no Docker, and no git with the one-line installer (the marketplace route fetches through git).
 - The optional depth layer adds its own requirements: `uvx` (from [uv](https://github.com/astral-sh/uv)) to run browser-use locally, an `ANTHROPIC_API_KEY` (extraction runs on Anthropic via scout's shim), and a local Chromium that browser-use manages. See **Optional depth layer (browser-use)** above. None of this is needed for breadth.
-- The optional SearXNG meta backend needs `npx` (from [Node.js](https://nodejs.org)) to run the MCP, and **Docker** to run the container via `scout meta` or `/scout:meta`; the first start on mac/Linux also needs `openssl` to generate the secret. Docker is needed **only** for `meta` — never for the default `scout` path. See **Optional metasearch backend (SearXNG)** above.
+- The optional SearXNG meta backend needs `npx` (from [Node.js](https://nodejs.org)) to run the MCP, and **Docker** to run the container via `scout meta` or `/scout:meta`; the first start also needs `openssl` to generate the secret. Docker is needed **only** for `meta` — never for the default `scout` path. See **Optional metasearch backend (SearXNG)** above.
 
 ## License
 

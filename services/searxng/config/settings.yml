@@ -6,11 +6,10 @@ search:
     - html
     - json
 server:
-  # No secret is committed, and this template is never written. On mac/Linux,
+  # No secret is committed, and this template is never written.
   # start-searxng.sh (run by `scout meta` and /scout:meta) generates a key with
   # `openssl rand -hex 32` into scout's state directory on first start and
   # renders a copy of this file there, with the key filled in, on every start.
-  # (The Windows launcher still writes the key into its installed copy.)
   secret_key: ""
   # limiter off: single-user localhost (scout meta) is fine. If you expose this
   # SearXNG on a shared or public host, re-enable the limiter (set to true).

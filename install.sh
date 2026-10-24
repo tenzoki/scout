@@ -2,10 +2,9 @@
 #
 # scout installer — macOS / Linux
 #
-# Installs scout as a Claude Code plugin WITHOUT git, without SSH, and without
-# Claude Code's plugin marketplace cache. It downloads the plugin over plain
-# HTTPS, drops it in ~/.scout, and installs a `scout` launcher that loads the
-# plugin straight from that directory on every run.
+# Installs scout's `scout` launcher route: it downloads the plugin over plain
+# HTTPS (no git, no SSH), drops it in ~/.scout, and installs a `scout` launcher
+# that loads the plugin straight from that directory on every run.
 #
 #   Install / update:  curl -fsSL https://raw.githubusercontent.com/tenzoki/scout/main/install.sh | bash
 #   Run:               scout
@@ -20,14 +19,17 @@
 #   env-prefix form  BROWSERUSE_ANTHROPIC_KEY=sk-ant-... scout  — an argv key can
 #   appear in shell history and in `ps aux` while the command runs.)
 #
-# Why this exists: the marketplace path clones over git (breaks when a user's
-# git is configured for SSH or has no key) and its cache is not reliably
-# replaced on update/uninstall. This path avoids all of that — it is just a
-# download into a folder plus a one-line launcher.
+# Why this exists: the primary install route is the Claude Code marketplace
+# (/plugin install scout@tenzoki-plugins). This launcher is the second, mac/Linux
+# route. It adds what a plugin install has no place for: a `scout` shell command
+# with `scout brief`, `scout --key` and `scout meta`, and a stable plugin path
+# (~/.scout) instead of the versioned plugin cache. The two copies are separate:
+# a launcher session's --plugin-dir overrides an enabled marketplace copy, and
+# `scout --update` refreshes only this one.
 #
 # Overrides (optional env vars):
 #   SCOUT_REF   git ref to fetch (default: heads/main; pin a release with
-#               SCOUT_REF=tags/v0.1.0)
+#               SCOUT_REF=tags/scout--v0.6.1 — release tags are scout--v<version>)
 #   SCOUT_HOME  install dir (default: ~/.scout)
 #   SCOUT_BIN   launcher dir (default: ~/.local/bin)
 
@@ -148,9 +150,22 @@ fi
 
 case "\${1:-}" in
   --update)
-    curl -fsSL "https://raw.githubusercontent.com/$REPO/main/install.sh" -o /tmp/scout-install.sh \
-      && bash /tmp/scout-install.sh
-    exit \$?
+    # Reinstall into the same places this launcher was installed to: the
+    # install-time SCOUT_HOME and SCOUT_BIN are baked in here (like SCOUT_DIR
+    # above), so a custom-location install updates itself rather than creating
+    # a second copy in ~/.scout. The installer is downloaded to a private
+    # mktemp file, not a fixed /tmp name, and removed afterwards. rc is set in
+    # if/|| conditions so a failure under set -e still reaches the cleanup.
+    SCOUT_UPD="\$(mktemp "\${TMPDIR:-/tmp}/scout-install.XXXXXX")" || exit 1
+    rc=0
+    if curl -fsSL "https://raw.githubusercontent.com/$REPO/main/install.sh" -o "\$SCOUT_UPD"; then
+      SCOUT_HOME="$INSTALL_DIR" SCOUT_BIN="$BIN_DIR" bash "\$SCOUT_UPD" || rc=\$?
+    else
+      rc=\$?
+      echo "scout: could not download the installer; nothing was changed." >&2
+    fi
+    rm -f "\$SCOUT_UPD"
+    exit \$rc
     ;;
   --uninstall)
     rm -rf "\$SCOUT_DIR" "$LAUNCHER"

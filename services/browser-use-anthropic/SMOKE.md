@@ -14,7 +14,8 @@ version bump, after re-confirming the shim's patched symbols still exist
 (`server.ChatOpenAI`, `BrowserUseServer._init_browser_session`, `ChatAnthropic`).
 
 Throughout, `<plugin>` is your scout plugin root:
-- installed copy: `~/.scout`
+- launcher install: `~/.scout`
+- marketplace install: `~/.claude/plugins/cache/tenzoki-plugins/scout/<version>/`
 - source tree: the `scout/` repo checkout
 
 So the source shim is
