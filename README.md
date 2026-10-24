@@ -144,7 +144,7 @@ Then update the plugin from your terminal:
 claude plugin update scout@tenzoki-plugins
 ```
 
-Restart Claude Code afterwards to load the new version. If the release notes say the shim or the browser-use pin changed, re-run `/scout:setup` as well (see [After an update](#after-an-update-re-run-scoutsetup-when-the-shim-or-the-pin-changed)).
+Restart Claude Code afterwards to load the new version. If you use the depth layer and the release changes its registered command, re-run `/scout:setup` as well (see [After an update](#after-an-update-re-run-scoutsetup-when-the-registered-command-changed)); coming from a version before 0.6.3, it does (see [Upgrading to 0.6.3 or later](#upgrading-to-063-or-later)).
 
 ### Two copies: launcher and marketplace
 
@@ -167,6 +167,10 @@ Two things changed in 0.6.0 that an existing install does not pick up by itself:
 
 - **SearXNG container.** 0.5.0 created `scout-searxng` under the compose project `searxng`; 0.6.0 uses the project `scout-searxng`. The next `scout meta` or `/scout:meta` finds the old container, removes it and says so, then starts a fresh one. To do it by hand instead, run `docker rm -f scout-searxng` once before the first start on 0.6.0.
 - **Depth layer.** Re-run `/scout:setup` once, so the shim is copied into the [state directory](#scouts-state-directory) and the registration names that copy instead of a path inside the plugin folder.
+
+## Upgrading to 0.6.3 or later
+
+If you use the depth layer (browser-use), re-register it once after updating to 0.6.3 or later: run `/scout:setup`, or `scout --key "$BROWSERUSE_ANTHROPIC_KEY"` from the launcher. 0.6.3 added three arguments to the registered command (`--python 3.12`, `--with mcp==1.30.0`, `--with pydantic-settings==2.16.1`). A registration written before 0.6.3 lacks them and can fail to start on a fresh environment (an old system Python, or `mcp` 2.x). `claude mcp get browser-use` shows whether yours carries them.
 
 ## scout's state directory
 
@@ -354,7 +358,7 @@ The fastest way to wire the depth layer is to set `BROWSERUSE_ANTHROPIC_KEY` **b
 BROWSERUSE_ANTHROPIC_KEY=sk-ant-... curl -fsSL https://raw.githubusercontent.com/tenzoki/scout/main/install.sh | bash
 ```
 
-This pins the key into the **browser-use MCP server only** — so you do **not** export `ANTHROPIC_API_KEY` in your shell. Your scout session stays on claude.ai-subscription/OAuth auth and **Remote Control keeps working** (an exported `ANTHROPIC_API_KEY` would flip the whole session to API-key auth and disable both — see the inherit-vs-pin note under [You need your own Anthropic API key](#you-need-your-own-anthropic-api-key) and the registration notes below).
+This pins the key into the **browser-use MCP server only** — so you do **not** export `ANTHROPIC_API_KEY` in your shell. Your scout session stays on claude.ai-subscription/OAuth auth and **Remote Control keeps working** (an exported `ANTHROPIC_API_KEY` would flip the whole session to API-key auth and disable both — see the inherit-mode note under [Register the MCP server](#register-the-mcp-server)).
 
 - **Optional.** scout's breadth core needs no key; leave the var unset and install/update behave exactly as before, touching no existing browser-use registration.
 - **Best-effort.** If a prerequisite is missing (`uvx`, the `claude` CLI), the installer warns and still finishes — the breadth core is installed regardless.
@@ -363,38 +367,27 @@ This pins the key into the **browser-use MCP server only** — so you do **not**
 
 ### Register the MCP server
 
-**Easiest path:** run the `/scout:setup` skill. It registers the server for you with the `0.11.9` pin and both no-cloud env vars baked in, checks `uvx`, and prompts for your Anthropic key (it never writes the key into the repo).
+**Easiest path:** set `BROWSERUSE_ANTHROPIC_KEY` in the shell you start Claude Code from, then run the `/scout:setup` skill. It checks `uvx` and registers the server for you with the `0.11.9` pin and both no-cloud env vars baked in, pinning the key from that variable. It never asks for the key in the chat, and never prints it or writes it into the repo; don't paste a key into the chat. When the variable is not set in the Claude Code session (the session's environment can differ from your shell's, for example inside a container), `/scout:setup` registers nothing and hands you the command to run in your own shell instead, which is the script below or `scout --key "$BROWSERUSE_ANTHROPIC_KEY"`. Restart Claude Code afterwards.
 
 **Run the script directly (technical users):** the registration mechanics live in one script, `skills/setup/register-browser-use.sh`, which `/scout:setup` simply drives. You can run it yourself:
 
 ```bash
-# Inherit ANTHROPIC_API_KEY from your environment (no key written into the config):
-BROWSERUSE_INHERIT=1 bash ~/.scout/skills/setup/register-browser-use.sh
+# Pin the key from BROWSERUSE_ANTHROPIC_KEY (already set in this shell) into the user-scope MCP config:
+bash ~/.scout/skills/setup/register-browser-use.sh
 
-# Or pin a specific key into the user-scope MCP config:
-BROWSERUSE_ANTHROPIC_KEY=sk-ant-... bash ~/.scout/skills/setup/register-browser-use.sh
+# Inherit mode (not recommended, see the warning below): no key in the config.
+BROWSERUSE_INHERIT=1 bash ~/.scout/skills/setup/register-browser-use.sh
 ```
 
-Run with neither variable on an interactive terminal and it offers inherit (when `ANTHROPIC_API_KEY` is set) or prompts for a key with hidden input. It never writes the key to a file or echoes it. (Adjust the path if you set `SCOUT_HOME`. With a marketplace install the script sits in Claude Code's plugin cache, so use `/scout:setup` there.)
+Run with neither variable on an interactive terminal and it offers inherit (when `ANTHROPIC_API_KEY` is set) or prompts for a key with hidden input. It never writes the key to a file or prints it; the key is masked in everything the script prints. (Adjust the path if you set `SCOUT_HOME`. With a marketplace install the script sits in Claude Code's plugin cache, so use `/scout:setup` there.)
 
 **The registration names a copy of the shim in scout's state directory, never a file inside the plugin.** The script copies `services/browser-use-anthropic/scout_browseruse_anthropic.py` to `~/.local/state/scout/browser-use-anthropic/` (see [scout's state directory](#scouts-state-directory)), checks the copy byte for byte, and registers that path. A plugin update replaces the plugin folder, and a marketplace update deletes the old version's folder 14 days later; a registration pointing into it would stop starting without an error. `claude mcp get browser-use` should show the shim under `~/.local/state/scout/`. The script stops with a non-zero exit if the entry is missing, does not name that copy, or names a path under `~/.claude/plugins/cache/` instead, and a failed `claude mcp add` stops it the same way; the installer and `scout --key` then report the failure instead of success.
 
-> **Inherit mode: export the key *before* you start Claude Code.** With `BROWSERUSE_INHERIT=1`, no key is written to the config — the browser-use MCP server reads `ANTHROPIC_API_KEY` from the environment of the Claude Code process *at the moment that process launches*. If the key was not exported before Claude Code started, registration still shows green, but your first `browser_extract_content` call fails with an opaque auth error. So export the key first, then launch Claude Code:
->
-> ```bash
-> export ANTHROPIC_API_KEY=sk-ant-...
-> export ANONYMIZED_TELEMETRY=False
-> export BROWSER_USE_VERSION_CHECK=false
-> scout          # or however you launch Claude Code with the scout agent
-> ```
->
-> Put that `export ANTHROPIC_API_KEY=...` line in a file you source on shell start (e.g. a private `~/.scout-env` you `source` from your shell profile), kept **outside any repo** so the key never lands in version control. Registering inherit-mode in one shell and then launching Claude Code from a different shell that never sourced the key is the exact trap this avoids: the key has to be live in the launching shell, not just the shell you registered from. If you would rather not manage shell environment at all, pin the key with `BROWSERUSE_ANTHROPIC_KEY=sk-ant-...` instead — it goes only into Claude Code's user-scope MCP config.
+> **Inherit mode puts Claude Code itself on API billing.** With `BROWSERUSE_INHERIT=1`, no key is written to the config; the browser-use MCP server reads `ANTHROPIC_API_KEY` from the environment of the Claude Code process when that process launches. But `ANTHROPIC_API_KEY` in that environment also switches the whole Claude Code session to **API-key auth and API billing**, off your claude.ai subscription, and disables **Remote Control**. That is why scout pins the key from `BROWSERUSE_ANTHROPIC_KEY` instead: only the browser-use server sees it, and session auth is unaffected. Use inherit mode only if your Claude Code already runs on an API key. The key must then be in the launching environment *before* Claude Code starts: set later, registration still shows green, but the first `browser_extract_content` call fails with an opaque auth error. (The SearXNG meta backend needs no Anthropic key, so it never triggers this.)
 
-> **Inherit mode changes your whole-session auth.** Exporting `ANTHROPIC_API_KEY` session-wide (the inherit-mode path) switches the entire Claude Code session to **API-key auth** — which disables claude.ai-subscription auth and **Remote Control** (and some orgs disallow Remote Control by policy). If you rely on subscription auth or Remote Control *and* want the depth layer, **pin** the key into the browser-use server instead (`BROWSERUSE_ANTHROPIC_KEY=...` via `/scout:setup` or the script). Then only the browser-use server sees the key, the session environment stays clean, and session auth — including Remote Control — is unaffected. (The SearXNG meta backend needs no Anthropic key, so it never triggers this.)
+### After an update, re-run `/scout:setup` when the registered command changed
 
-### After an update, re-run `/scout:setup` when the shim or the pin changed
-
-The shim copy is refreshed only when the registration runs. Updating scout, by either route, leaves the old copy in place, and the depth layer keeps working with it. When a scout release's notes say the shim or the browser-use pin changed, re-run `/scout:setup` (or the register script) once to copy the new shim and register the new pin.
+The shim copy and the registered command are refreshed only when the registration runs. Updating scout, by either route, leaves the old copy and the old registration in place. Whenever a scout release changes the registered command — the shim, the browser-use pin, or any other argument — re-run `/scout:setup` (or `scout --key "$BROWSERUSE_ANTHROPIC_KEY"`, or the register script) once. An un-refreshed registration keeps working only while nothing it lacks is needed; 0.6.3 is a release where that does not hold (see [Upgrading to 0.6.3 or later](#upgrading-to-063-or-later)).
 
 ### Manual registration
 
@@ -441,7 +434,7 @@ The pin is `0.11.9` — the version scout's depth layer is built and verified ag
 
 ### You need your own Anthropic API key
 
-The depth layer's main LLM-using tool, `browser_extract_content` (turn a page into structured text), calls an LLM, and you supply the key via `ANTHROPIC_API_KEY`. Stock browser-use `0.11.9` hardwires that extraction call to OpenAI at the MCP layer. scout ships a small runtime shim (`services/browser-use-anthropic/scout_browseruse_anthropic.py`) that rebinds the extraction LLM to Anthropic, so a fast Claude model (`claude-haiku-4-5` by default) handles extraction and you need only an Anthropic key. Override the model with `SCOUT_DEPTH_EXTRACT_MODEL` and the extraction temperature with `SCOUT_DEPTH_EXTRACT_TEMPERATURE` (unset, it is `0` with the default model and left to the API default with an overridden model).
+The depth layer's main LLM-using tool, `browser_extract_content` (turn a page into structured text), calls an LLM, and you supply the key via `BROWSERUSE_ANTHROPIC_KEY`, which the registration pins into the browser-use server's own `ANTHROPIC_API_KEY`. Stock browser-use `0.11.9` hardwires that extraction call to OpenAI at the MCP layer. scout ships a small runtime shim (`services/browser-use-anthropic/scout_browseruse_anthropic.py`) that rebinds the extraction LLM to Anthropic, so a fast Claude model (`claude-haiku-4-5` by default) handles extraction and you need only an Anthropic key. Override the model with `SCOUT_DEPTH_EXTRACT_MODEL` and the extraction temperature with `SCOUT_DEPTH_EXTRACT_TEMPERATURE` (unset, it is `0` with the default model and left to the API default with an overridden model).
 
 The shim patches **extraction only**. The last-resort internal loop, `retry_with_browser_use_agent`, stays OpenAI/Bedrock-only upstream; if you reach for it you still need an OpenAI or Bedrock key.
 
@@ -549,7 +542,7 @@ Default is English. scout ships professional-voice style profiles (for the repor
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) v2.0.12 or higher.
 - That's it for the breadth layer — no Node, no Python, no Docker, and no git with the one-line installer (the marketplace route fetches through git).
-- The optional depth layer adds its own requirements: `uvx` (from [uv](https://github.com/astral-sh/uv)) to run browser-use locally, an `ANTHROPIC_API_KEY` (extraction runs on Anthropic via scout's shim), and a local Chromium that browser-use manages. See **Optional depth layer (browser-use)** above. None of this is needed for breadth.
+- The optional depth layer adds its own requirements: `uvx` (from [uv](https://github.com/astral-sh/uv)) to run browser-use locally, an Anthropic API key set as `BROWSERUSE_ANTHROPIC_KEY` (extraction runs on Anthropic via scout's shim), and a local Chromium that browser-use manages. See **Optional depth layer (browser-use)** above. None of this is needed for breadth.
 - The optional SearXNG meta backend needs `npx` (from [Node.js](https://nodejs.org)) to run the MCP, and **Docker** to run the container via `scout meta` or `/scout:meta`; the first start also needs `openssl` to generate the secret. Docker is needed **only** for `meta` — never for the default `scout` path. See **Optional metasearch backend (SearXNG)** above.
 
 ## License

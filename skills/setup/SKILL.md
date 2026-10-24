@@ -1,5 +1,5 @@
 ---
-description: Set up scout's optional add-ons by registering their MCP servers, so a non-technical user does not hand-edit Claude Code's MCP config. Covers two optional layers — the browser-use depth layer (interactive browsing) and the SearXNG meta discovery backend (self-hosted metasearch). Invoke when the user wants to "set up scout depth", "enable interactive browsing", "register browser-use", "turn on the depth layer", "let scout drive a real browser", "set up scout meta", "enable SearXNG", or "register the metasearch backend". The SearXNG container itself is started separately, with `scout meta` in a shell or `/scout:meta` in a Claude Code session. browser-use registers a local Chromium stack pinned to the tested version with both no-cloud env vars and an Anthropic key the user supplies (extraction runs on Anthropic via scout's shim); SearXNG registers the self-hosted metasearch MCP (no key). Idempotent and non-destructive — both layers are entirely OPTIONAL; scout works breadth-only with WebSearch without either.
+description: Set up scout's optional add-ons by registering their MCP servers, so a non-technical user does not hand-edit Claude Code's MCP config. Covers two optional layers — the browser-use depth layer (interactive browsing) and the SearXNG meta discovery backend (self-hosted metasearch). Invoke when the user wants to "set up scout depth", "enable interactive browsing", "register browser-use", "turn on the depth layer", "let scout drive a real browser", "set up scout meta", "enable SearXNG", or "register the metasearch backend". The SearXNG container itself is started separately, with `scout meta` in a shell or `/scout:meta` in a Claude Code session. browser-use registers a local Chromium stack pinned to the tested version with both no-cloud env vars and the Anthropic key from BROWSERUSE_ANTHROPIC_KEY in the environment, never one typed into the chat (extraction runs on Anthropic via scout's shim); SearXNG registers the self-hosted metasearch MCP (no key). Idempotent and non-destructive — both layers are entirely OPTIONAL; scout works breadth-only with WebSearch without either.
 allowed-tools: [Bash, Read, AskUserQuestion]
 ---
 
@@ -53,55 +53,60 @@ If the server is already registered, the script removes the old user-scope entry
 claude mcp get browser-use >/dev/null 2>&1 && echo "browser-use: already registered (will re-register with the tested pin)" || echo "browser-use: not yet registered"
 ```
 
-## Step 3 — Decide the Anthropic key path (never hardcode it, never write it into the repo)
+## Step 3 — Find the Anthropic key (presence only; the key never enters this conversation)
 
-The depth layer's extraction tool, `browser_extract_content` (turn a page into structured text), calls an LLM. scout's shim runs that call on Anthropic, so the key is an `ANTHROPIC_API_KEY`. This is an ordinary external LLM call, the same kind scout already makes; it is not a "no cloud" violation (the no-cloud rule bans browser-use's hosted *service*, not external LLMs). The last-resort `retry_with_browser_use_agent` loop stays OpenAI/Bedrock-only upstream — the shim patches extraction, not the agent loop — so reaching for it still needs an OpenAI or Bedrock key.
+The depth layer's extraction tool, `browser_extract_content` (turn a page into structured text), calls an LLM. scout's shim runs that call on Anthropic, so it needs an Anthropic API key. This is an ordinary external LLM call, the same kind scout already makes; it is not a "no cloud" violation (the no-cloud rule bans browser-use's hosted *service*, not external LLMs). The last-resort `retry_with_browser_use_agent` loop stays OpenAI/Bedrock-only upstream — the shim patches extraction, not the agent loop — so reaching for it still needs an OpenAI or Bedrock key.
 
-Prefer a key already in the environment. Check whether one is set, **without printing it**:
+**The key never passes through this conversation.** Never ask for it, never offer to take it, never read it back, never print it — not its value, not its length, not a prefix. The key comes from `BROWSERUSE_ANTHROPIC_KEY` in the environment, and the script reads it from there. If the user pastes a key into the chat anyway: tell them not to, do not use it in any command, and suggest they rotate it in the Anthropic console, because it now sits in the transcript.
+
+Check which variables are set, **presence only** (these lines cannot print a value):
 
 ```bash
-if [ -n "${ANTHROPIC_API_KEY:-}" ]; then echo "ANTHROPIC_API_KEY: present in environment (length ${#ANTHROPIC_API_KEY})"; else echo "ANTHROPIC_API_KEY: not set"; fi
+[ -n "${BROWSERUSE_ANTHROPIC_KEY:-}" ] && echo "BROWSERUSE_ANTHROPIC_KEY: set" || echo "BROWSERUSE_ANTHROPIC_KEY: unset"
+[ -n "${ANTHROPIC_API_KEY:-}" ] && echo "ANTHROPIC_API_KEY: set" || echo "ANTHROPIC_API_KEY: unset"
 ```
 
-Make the decision with the user via `AskUserQuestion`, then carry it into Step 4:
+This shows the environment of *this Claude Code session*, which can differ from the user's own shell (a variable set in a profile this session did not source, a shell inside a container, a session started from an app). Say so when the result surprises the user.
 
-- **If present:** ask whether scout should **inherit** the key already in their environment (recommended — the key then never lands in the MCP config file, and never appears in any process argument) or **pin** it into the config. Inherit is the default. If they choose inherit, you will invoke the script with `BROWSERUSE_INHERIT=1`. If they choose pin, collect the key as below.
-- **If not set:** ask the user to supply their Anthropic key via `AskUserQuestion`. Read it from them directly. You will pass it to the script via the `BROWSERUSE_ANTHROPIC_KEY` env var in Step 4 — it goes only into Claude Code's user-scope MCP config.
+Decide, then carry it into Step 4:
 
-> **Inherit mode reads the key at launch, not at registration — flag this whenever inherit is on the table.** With inherit, no key is written to the config; the browser-use MCP server reads `ANTHROPIC_API_KEY` from the environment of the Claude Code process *when that process starts*. So the key must be exported **before** Claude Code launches, in the shell that launches it.
->
-> Two consequences to tell the user plainly:
->
-> - **If the key was NOT in this session's environment when Claude Code started** (the `ANTHROPIC_API_KEY: not set` check above), then inherit cannot see it — even if you register now. Exporting it inside this running session is too late: the server inherits the environment that was live at Claude Code's launch. They must export the key and **restart Claude Code** for inherit to pick it up. If they don't want to restart, pin the key instead (`BROWSERUSE_ANTHROPIC_KEY=...`).
-> - **Make it durable.** Recommend putting `export ANTHROPIC_API_KEY=sk-ant-...` in a file they source on shell start (e.g. a private `~/.scout-env` sourced from their shell profile), kept **outside any repo** so the key never lands in version control. That way every future shell — and every Claude Code launch from it — already has the key.
->
-> The register script also warns loudly on this exact case (inherit selected with no key in the registering environment), so the warning is reinforced at registration time. Pinning the key sidesteps the whole launch-timing question.
+- **`BROWSERUSE_ANTHROPIC_KEY: set` → pinned path (the default).** The script pins that key into the browser-use server's user-scope MCP config. No question to ask.
+- **`BROWSERUSE_ANTHROPIC_KEY: unset` → do not register the depth layer from here.** Hand the user the command to run **themselves, in their own shell** where the variable is set (possibly inside a container). Write `${CLAUDE_PLUGIN_ROOT}` out as the real absolute path, not the variable (run `printf '%s\n' "${CLAUDE_PLUGIN_ROOT}"` if you need it):
 
-Whichever path: **never** echo the full key back into chat, never write it into any file in the repo, and never put it in a commit.
+  ```bash
+  bash "<absolute plugin root>/skills/setup/register-browser-use.sh"
+  ```
+
+  With the launcher install, `scout --key "$BROWSERUSE_ANTHROPIC_KEY"` does the same. Either way the shell expands the variable, so the key is never typed out. Then they restart Claude Code. If the variable is not set anywhere yet, tell them to set `BROWSERUSE_ANTHROPIC_KEY` in that shell first — not `ANTHROPIC_API_KEY` (see below). The SearXNG path needs no key and is unaffected.
+- **`ANTHROPIC_API_KEY: set`** changes none of the above. Tell the user plainly: with `ANTHROPIC_API_KEY` in its launch environment, Claude Code itself runs on API-key auth and API billing, not their subscription. scout does not use that variable unless they explicitly ask for inherit mode.
+
+**Inherit mode — only on explicit request.** The script still supports `BROWSERUSE_INHERIT=1`: no key is written to the config, and the browser-use server reads `ANTHROPIC_API_KEY` from the environment of the Claude Code process when it starts. Offer it only when the user asks for it, and warn first: **`ANTHROPIC_API_KEY` in the environment that launches Claude Code switches Claude Code itself to API billing** (and off subscription auth and Remote Control). The key must also be in that environment *before* Claude Code launches; exporting it inside a running session is too late. Never recommend exporting `ANTHROPIC_API_KEY` in a shell profile.
+
+Whichever path: never write the key into any file in the repo, and never put it in a commit.
 
 ## Step 4 — Register the server (invoke the script)
 
 Invoke the single-source-of-truth script. It removes any existing user-scope `browser-use`, adds it fresh under the **exact** name `browser-use` (coupled to scout's allow-list: scout's tools are `mcp__browser-use__browser_navigate`, `mcp__browser-use__browser_get_state`, and so on — a different name means scout silently falls back to breadth-only), at **user scope** so depth works from any project directory, with the tested pin and both mandatory no-cloud env vars baked in, and then verifies.
 
-Pass the key decision from Step 3 via env so nothing key-shaped is typed into a visible command line by hand:
+**Pinned path** (`BROWSERUSE_ANTHROPIC_KEY: set` in Step 3). The script reads the key from the inherited environment, so the command line carries no key. `BROWSERUSE_INHERIT=` clears a stray inherit setting so the script takes the pinned branch:
 
-**Environment-inherit path** (user chose to inherit an existing `ANTHROPIC_API_KEY`):
+```bash
+BROWSERUSE_INHERIT= bash "${CLAUDE_PLUGIN_ROOT}/skills/setup/register-browser-use.sh"
+```
+
+Never write the key, or a placeholder for it, into the command. The script masks the key in everything it prints.
+
+**Inherit path** (only when the user explicitly asked for it, after the billing warning in Step 3):
 
 ```bash
 BROWSERUSE_INHERIT=1 bash "${CLAUDE_PLUGIN_ROOT}/skills/setup/register-browser-use.sh"
 ```
 
-When you run the inherit path, read the script's output to the user — it prints a notice that the key is read at launch time from the shell that starts Claude Code, and a loud WARNING if `ANTHROPIC_API_KEY` was absent from the registering environment. Do not bury that warning; repeat its gist in scout's voice (export the key before launching Claude Code, restart if it wasn't set when this session started).
+Read the script's inherit notice and any WARNING to the user in scout's voice; do not bury them.
 
-**Pinned-key path** (user supplied a key to write into the config):
+The script prints its own prerequisite, registration, and verification output.
 
-```bash
-BROWSERUSE_ANTHROPIC_KEY="<the key the user supplied>" bash "${CLAUDE_PLUGIN_ROOT}/skills/setup/register-browser-use.sh"
-```
-
-Substitute the real key only in the actual command you run; never display the substituted command back to the user with the key in it. The script prints its own prerequisite, registration, and verification output.
-
-The script copies the shim out of this plugin copy into scout's state directory, `${SCOUT_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/scout}`, and registers that copy. A plugin update replaces the plugin tree, so the registration must never name a file inside it. When a later scout release changes the shim or the browser-use pin, the user re-runs `/scout:setup` to refresh the copy.
+The script copies the shim out of this plugin copy into scout's state directory, `${SCOUT_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/scout}`, and registers that copy. A plugin update replaces the plugin tree, so the registration must never name a file inside it. Whenever a scout release changes the registered command — the shim, the browser-use pin, or any other argument — the user re-runs `/scout:setup` (or `scout --key "$BROWSERUSE_ANTHROPIC_KEY"`) to refresh the copy and the registration.
 
 **Fallback — if the script cannot run in this environment** (e.g. the CLI registration forms fail in this Claude Code version): first run the ownership check (the first shell line below, the same condition `register-browser-use.sh` applies before it writes). If it prints `Stopping:`, run none of the other lines: tell the user that folder exists and was not written by scout, and that they should move it aside or set `SCOUT_STATE_DIR` to another directory. Only when it prints `ownership check: ok`, create the shim copy with the other three lines (the last writes the `.scout-owned` marker the script writes, without which `scout --uninstall` leaves the folder in a custom `SCOUT_STATE_DIR`), then print the exact JSON `mcpServers` block for the user to paste into their MCP settings by hand, and tell them plainly that you are falling back to the manual paste because the scripted registration was unavailable:
 
@@ -142,9 +147,9 @@ Do not guess a different registration command. Use the script, or the manual JSO
 
 ## Step 5 — Confirm the registration took
 
-The script ends by running `claude mcp get browser-use` and printing the result. Read its output: it should show `Type: stdio`, `Command: uvx`, args including `--python 3.12`, `--from`, `browser-use[cli]@0.11.9`, `--with mcp==1.30.0`, `--with pydantic-settings==2.16.1`, the shim path `<state dir>/browser-use-anthropic/scout_browseruse_anthropic.py` (by default `~/.local/state/scout/browser-use-anthropic/scout_browseruse_anthropic.py`, never a path under `~/.claude/plugins/cache/` or inside `~/.scout`), and `--mcp`, and the env carrying `SCOUT_DEPTH_PROVIDER`, `ANONYMIZED_TELEMETRY`, and `BROWSER_USE_VERSION_CHECK`. Do not print any `ANTHROPIC_API_KEY` value from this output. The script exits non-zero when `claude mcp add` failed, when the verified entry is missing, does not name the shim copy or lacks one of the three pins above, or when it names a path under `/plugins/cache/` (a file a plugin update deletes). Read the exit code: on non-zero, the registration did not take — report the script's `Stopping:` line and stop so the user can retry, rather than reporting a false success. Note that the old entry is removed before the add, so a failed add leaves no browser-use registration at all.
+The script ends by running `claude mcp get browser-use` and printing the result. Read its output: it should show `Type: stdio`, `Command: uvx`, args including `--python 3.12`, `--from`, `browser-use[cli]@0.11.9`, `--with mcp==1.30.0`, `--with pydantic-settings==2.16.1`, the shim path `<state dir>/browser-use-anthropic/scout_browseruse_anthropic.py` (by default `~/.local/state/scout/browser-use-anthropic/scout_browseruse_anthropic.py`, never a path under `~/.claude/plugins/cache/` or inside `~/.scout`), and `--mcp`, and the env carrying `SCOUT_DEPTH_PROVIDER`, `ANONYMIZED_TELEMETRY`, and `BROWSER_USE_VERSION_CHECK`. The script masks any `ANTHROPIC_API_KEY` value as `<redacted>`; never try to recover or print it. The script exits non-zero when `claude mcp add` failed, when the verified entry is missing, does not name the shim copy or lacks one of the three pins above, or when it names a path under `/plugins/cache/` (a file a plugin update deletes). Read the exit code: on non-zero, the registration did not take — report the script's `Stopping:` line and stop so the user can retry, rather than reporting a false success. Note that the old entry is removed before the add, so a failed add leaves no browser-use registration at all.
 
-On success, tell the user: depth is registered. Re-run scout — pages that need an interactive browser will now be driven in a real local Chromium, and depth findings will carry the `depth (browser-use, manual drive)` method tag in the report. If they registered via inherit, remind them once more that the depth layer only works when `ANTHROPIC_API_KEY` is live in the shell that launches scout/Claude Code — a green registration alone does not prove the key is reachable at runtime.
+On success, tell the user: depth is registered. Re-run scout — pages that need an interactive browser will now be driven in a real local Chromium, and depth findings will carry the `depth (browser-use, manual drive)` method tag in the report. Restart Claude Code so the new registration loads. If they registered via inherit at their explicit request, remind them once that the depth layer then only works when `ANTHROPIC_API_KEY` is live in the shell that launches Claude Code — a green registration alone does not prove the key is reachable — and that the same variable puts Claude Code itself on API billing.
 
 ## Step 6 — Set expectations honestly (no captcha; foreground handoff)
 
@@ -213,7 +218,7 @@ With this in place, scout's `printenv SCOUT_FILE_PREFIX`, `date`, `mkdir` and `p
 ## What this skill does NOT do
 
 - Does not install `uv`/`uvx`, `npx`/Node, Docker, Claude Code, or a browser — it only checks and points at the install page if missing.
-- Does not write your Anthropic key into any repo file, print it, or commit it. The SearXNG path writes no secret at all.
+- Does not ask for, accept, print or commit your Anthropic key, and never writes it into a repo file. It reads `BROWSERUSE_ANTHROPIC_KEY` from the environment or hands you the command to run in your own shell. The SearXNG path writes no secret at all.
 - Does not start the SearXNG container — that is the job of `scout meta` (in a shell) or `/scout:meta` (in a Claude Code session). This skill only registers the MCP.
 - Does not change scout's agent, plugin manifest, or style profiles.
 - Does not register anything if a prerequisite is missing — it stops cleanly.

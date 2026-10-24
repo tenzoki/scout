@@ -10,8 +10,10 @@
 #
 # Used two ways:
 #   1. Standalone (technical user):   bash register-browser-use.sh
-#   2. Invoked by /scout:setup, which collects the key conversationally and
-#      passes it via env so it never lands in shell history typed by a human.
+#   2. Invoked by /scout:setup, which never handles the key itself: it runs this
+#      script only when BROWSERUSE_ANTHROPIC_KEY is already in the session's
+#      environment, so the key is read from env and never appears on a command
+#      line or in the conversation.
 #
 # Key handling (in precedence order):
 #   - BROWSERUSE_INHERIT=1          -> register with NO key in the config; the
@@ -24,8 +26,10 @@
 #   - else (non-interactive)        -> stop, rather than guess.
 #
 # Note: pinning a key via the CLI necessarily passes it in argv (visible to `ps`
-# for an instant). The inherit path avoids that entirely and is the default when
-# ANTHROPIC_API_KEY is already in the environment.
+# for an instant). The inherit path avoids that, but it costs more than it
+# saves: ANTHROPIC_API_KEY in the environment that launches Claude Code switches
+# Claude Code itself to API-key auth and API billing, off the user's
+# subscription. Pinning keeps the key in the browser-use server only.
 #
 # Inherit timing: the inherit path reads ANTHROPIC_API_KEY at MCP server-launch
 # time from the environment of whatever shell launches Claude Code — NOT at
@@ -36,7 +40,9 @@
 # with an opaque auth error. This script warns loudly (below) when inherit is
 # selected with no key in the registering environment.
 #
-# This script never writes the key to a file and never echoes the full key.
+# This script never writes the key to a file and never echoes it: the output of
+# `claude mcp add` and `claude mcp get` is redacted before it is printed, because
+# /scout:setup runs this script inside a conversation that must never see the key.
 #
 # Shim location (state-dir rule): the registration is user-scope and outlives
 # every copy of the plugin, so it must not name a file inside one. The plugin
@@ -52,8 +58,9 @@
 # `scout --uninstall` requires before it removes the folder. Decision record:
 # 261016-2323-where-does-scout-keep-state-that-must-survive-a-plugin-update.md
 #
-# The copy is refreshed only when this script runs. A scout release that changes
-# the shim or the browser-use pin therefore needs /scout:setup re-run.
+# The copy and the registered command are refreshed only when this script runs.
+# A scout release that changes the registered command (the shim, the pin, or any
+# other argument) therefore needs /scout:setup re-run.
 #
 # Exit codes: 0 the entry is registered and names the shim copy; 1 anything
 # else, with the reason on stderr. Callers (the installer, the launcher's --key,
@@ -118,7 +125,8 @@ if [ "$INHERIT" -ne 1 ] && [ -n "${BROWSERUSE_ANTHROPIC_KEY:-}" ]; then
 elif [ "$INHERIT" -ne 1 ]; then
   if [ -t 0 ]; then
     if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
-      echo "ANTHROPIC_API_KEY found in environment (length ${#ANTHROPIC_API_KEY})."
+      echo "ANTHROPIC_API_KEY found in environment."
+      echo "Note: ANTHROPIC_API_KEY in the environment that launches Claude Code switches Claude Code itself to API billing, off your subscription. Pinning keeps the key in the browser-use server only."
       read -r -p "Inherit it instead of pinning it into the config? [Y/n] " ans
       case "${ans:-Y}" in [Nn]*) INHERIT=0 ;; *) INHERIT=1 ;; esac
     fi
@@ -146,11 +154,21 @@ if [ "$INHERIT" -eq 1 ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
     echo "WARNING: but depth will NOT work until you export the key and (re)start Claude Code."
     echo "WARNING: The browser-use MCP server reads ANTHROPIC_API_KEY at launch time from the shell"
     echo "WARNING: that starts Claude Code — not from this registration, and not from any file."
-    echo "WARNING: Fix: export ANTHROPIC_API_KEY=sk-ant-... in the shell that launches Claude Code,"
-    echo "WARNING: then restart Claude Code. Or re-run with BROWSERUSE_ANTHROPIC_KEY=sk-ant-... to pin it."
+    echo "WARNING: ANTHROPIC_API_KEY in the shell that launches Claude Code also switches Claude Code"
+    echo "WARNING: itself to API billing, off your subscription. Prefer pinning: set BROWSERUSE_ANTHROPIC_KEY"
+    echo "WARNING: in your shell and re-run this script without BROWSERUSE_INHERIT."
     echo
   } >&2
 fi
+
+# Print stdin with the key masked: the literal key this run pins, then any value
+# after ANTHROPIC_API_KEY= / ANTHROPIC_API_KEY: (a key left from an older entry).
+redact() {
+  local s
+  s="$(cat)"
+  if [ -n "$KEY" ]; then s="${s//"$KEY"/<redacted>}"; fi
+  printf '%s\n' "$s" | sed -E 's/(ANTHROPIC_API_KEY[=:][[:space:]]*)[^[:space:]",]+/\1<redacted>/g'
+}
 
 # Optional extraction overrides, forwarded into the registration only when set.
 # They are spliced into a JSON string in inherit mode, so the characters that
@@ -230,21 +248,25 @@ if [ "$INHERIT" -eq 1 ]; then
   echo "The browser-use MCP server reads ANTHROPIC_API_KEY at launch time from the"
   echo "environment of whatever shell starts Claude Code. Export it BEFORE you start"
   echo "Claude Code (in that launching shell), or depth fails on the first extract."
-  echo "Put 'export ANTHROPIC_API_KEY=sk-ant-...' in a file you source on shell start,"
-  echo "kept outside any repo. To sidestep env timing entirely, re-run with"
-  echo "BROWSERUSE_ANTHROPIC_KEY=sk-ant-... to pin the key into the user-scope config."
+  echo "WARNING: ANTHROPIC_API_KEY in that launching shell also switches Claude Code"
+  echo "itself to API-key auth and API billing, off your subscription. To keep the"
+  echo "key in the browser-use server only, set BROWSERUSE_ANTHROPIC_KEY in your shell"
+  echo "and re-run this script without BROWSERUSE_INHERIT (pinned mode)."
 else
   # Flag form keeps the key out of a JSON blob and matches the skill's documented
   # mechanism. The shim runs inside the pinned browser-use env via `--from`,
   # on the pinned Python and with the two pinned `--with` packages.
   # `${OPT_FLAGS[@]+...}` keeps an empty array from tripping `set -u` on bash 3.2.
-  claude mcp add browser-use uvx -s user -e ANTHROPIC_API_KEY="$KEY" -e SCOUT_DEPTH_PROVIDER=anthropic ${OPT_FLAGS[@]+"${OPT_FLAGS[@]}"} -e ANONYMIZED_TELEMETRY=False -e BROWSER_USE_VERSION_CHECK=false -- --python "$PYTHON" --from "$PIN" --with "$MCP_PIN" --with "$PS_PIN" python "$SHIM_PATH" --mcp || add_failed
+  # Output goes through redact; pipefail keeps claude's exit code deciding.
+  claude mcp add browser-use uvx -s user -e ANTHROPIC_API_KEY="$KEY" -e SCOUT_DEPTH_PROVIDER=anthropic ${OPT_FLAGS[@]+"${OPT_FLAGS[@]}"} -e ANONYMIZED_TELEMETRY=False -e BROWSER_USE_VERSION_CHECK=false -- --python "$PYTHON" --from "$PIN" --with "$MCP_PIN" --with "$PS_PIN" python "$SHIM_PATH" --mcp 2>&1 | redact || add_failed
 fi
 
 echo
 echo "== verify =="
 VERIFY_OUT="$(claude mcp get browser-use 2>&1)"
-printf '%s\n' "$VERIFY_OUT"
+# `claude mcp get` lists the server's env, a pinned key included. The checks
+# below read VERIFY_OUT; only the redacted copy is printed.
+printf '%s\n' "$VERIFY_OUT" | redact
 # A check that can fail decides the exit code: a missing entry, or one that does
 # not name the shim copy, is a failed registration, not a warning.
 case "$VERIFY_OUT" in
